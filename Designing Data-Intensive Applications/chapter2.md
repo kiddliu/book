@@ -273,3 +273,159 @@ SELECT * FROM animals WHERE family = 'Sharks';
 而SQL的例子没有保证任何特定的执行顺序，因为它也不在乎顺序是不是变了。但是假如查询是用命令式代码写的，数据库完全不能保证代码是不是依赖于特定的顺序。SQL在功能上更受限制的事实给了数据库更大的空间来追求自动优化。
 
 最后，声明式语言往往更适合并行执行。今天，CPU通过添加更多核心变得更快，而不是通过运行在更高的核心频率上。命令式代码很难在多核心或多设备上并行处理，因为它声明了指令必须以特定顺序执行。声明式语言更有可能在并行执行时跑得更快，因为它只声明了结果的模式，而不是用来计算结果的算法。数据库在合适的时候可以任意选择查询语言的并行实现。
+
+### 网络上的声明式查询
+
+声明式查询语言的优势并不只局限于数据库。为了展示这一点，让我们在一个完全不同的环境下比较声明式与命令式的方式：网页浏览器。
+
+假如你有一个关于海洋动物的网站。用户正在浏览关于鲨鱼的网页，于是你标记导航项“鲨鱼”被选中，就像这样
+```HTML
+<ul>
+  <li class="selected"> ➊
+    <p>Sharks</p> ➋
+    <ul>
+      <li>Great White Shark</li>
+      <li>Tiger Shark</li>
+      <li>Hammerhead Shark</li>
+    </ul>
+  </li>
+  <li>
+    <p>Whales</p>
+    <ul>
+      <li>Blue Whale</li>
+      <li>Humpback Whale</li>
+      <li>Fin Whale</li>
+    </ul>
+  </li>
+</ul>
+```
+➊ 选中的项被CSS类`"selected"`标记。
+
+➋ `<p>Sharks</p>`是当前选中页面的标题。
+
+现在假如你想让当前选中页面的标题有一个蓝色的背景，使得在视觉上高亮。用CSS的话，这很简单：
+```CSS
+li.selected > p {
+  background-color: blue;
+}
+```
+在这里CSS选择器`li.selected > p`声明了我们要应用蓝色背景风格的元素的模式：也就是，所有直接上一级元素是有着`selected`CSS类型的`<li>`元素的`<p>`元素。示例中的元素`<p>Sharks</p>`符合这个模式，而`<p>Whales</p>`元素因为其上一级`<li>`没有`class="selected"`于是不符合。
+
+假如你使用的的是XSL而不是CSS，你可以用很类似的方法：
+```XML
+<xsl:template match="li[@class='selected']/p">
+  <fo:block background-color="blue">
+    <xsl:apply-template/>
+  </fo:block>
+</xsl:template>
+```
+在这里，XPath表达式`li[@class='selected']/p`与前一个例子中的CSS选择器`li.selected > p`完全等价。CSS与XML的共通处在于它们都是用来描述文档风格的描述性语言。
+
+设想一下如果你必须用命令式方式会是什么样子。借助核心文档对象模型（DOM）API，在JavaScript中结果大概是这个样子的：
+```JavaScript
+var liElements = document.getElementByTagName("li");
+for (var i = 0; i < liElements.length; i++) {
+  if (liElements[i].className === "selected") {
+    var children = liElements[i].childNodes;
+    for (var j = 0; j < children.length; j++) {
+      var child = children[j];
+      if (child.nodeType === Node.ELEMENT_NODE && child.tagName === "P") {
+        child.setAttribute("style", "background-color: blue");
+      }
+    }
+  }
+}
+```
+这段JavaScript脚本命令式地设置了元素`<p>Sharks</p>`有了蓝色的背景，但是这段代码本身相当吓人。不仅仅是相对于CSS与XSL的方式更长也更难理解，而且本身也有几个很严重的问题：
+* 如果类型`selected`被删除了（比如因为用户点击了另外一个页面），蓝色的背景并不会被删除，即使是代码重新再跑一遍——于是这个项会一直高亮，直到整个页面重新加载。有了CSS，浏览器自动检测规则`li.selected > p`是否适用，一旦类型`selected`被移除背景也会被移除。
+* 如果你想发挥新API的优势，比如`document.getElementByClassName("selected")`甚至`document.evaluate()`——这些可以提升性能——你需要重写这段代码。另一方面，浏览器厂商可以在不打破兼容性的前提下提升CSS与XPath的性能。
+
+在浏览器中，使用声明式的CSS样式比用JavaScript命令式地操作样式要好得多。同样的在数据库中，类似SQL一样的声明式查询语言结果也就比命令式的查询API要好得多。
+
+### MapReduce查询
+
+MapReduce是一种编程模型，用来在多设备上处理分散的海量数据，由Google推广。MapReduce的一种受限形式被一些NoSQL数据库支持，包括MongoDB和CouchDB，作为一种在多设备上执行只读查询的机制。
+
+MapReduce的大概会更详细地在第十章描述。现在，我们只是准备简单地讨论一下MongoDB是如何使用这个模型的。
+
+MapReduce既不是一种声明式的查询语言也不是一种完整的命令式查询API，而是介于两者之间：查询的逻辑使用代码片段表达的，处理框架会不断地调用它们。它是基于存在于许多函数式编程语言中的`map`（也被称作`collect`）和`reduce`（也被称作`fold`或者`inject`）函数的。
+
+要给一个例子的话，假设你是一个海洋生物学家，每一次你在海里看到了动物你都会添加一条观测记录。现在你想要生成一个报告，看看每个月你看到多少条鲨鱼。
+
+在PostgreSQL中你大概会用到类似下面的查询：
+```SQL
+SELECT date_trunc('month', observation_timestamp) AS observation_month, ➊     sum(num_animals) AS total_animals
+FROM observations
+WHERE family = 'Sharks'
+GROUP BY observation_month;
+```
+➊ 函数`date_trunc('month', timestamp)`判断包含了`timestamp`的日历月，并返回代表这个月月初的时间戳。也就是说，它截取了时间戳的月份。
+
+这个查询首先过滤了所有的观测记录从而只显示`Sharks`家族的物种，然后根据观测的月份将它们分组，并且最终把当月所有观测到的动物数量加了起来。
+
+利用MongoDB的MapReduce功能，同样的查询可以表达为：
+```JavaScript
+db.observations.mapReduce(
+  function map() { ➋
+    var year = this.observationTimestamp.getFullYear();
+    var month = this.observationTimestamp.getMonth() + 1;
+    emit(year + "-" + month, this.numAnimals); ➌
+  },
+  function reduce(key, value) { ➍
+    return Array.sum(values); ➎
+  },
+  {
+    query: { family: "Sharks"}, ➊
+    out: "monthlySharkReport" ➏
+  }
+);
+```
+➊ 只考虑鲨鱼物种的过滤条件可以用声明式的方式指明（这是一个针对MongoDB的MapReduce扩展）。
+
+➋ JavaScript函数`map`每当文档满足`query`时被调用一次，其中`this`被设为文档对象。
+
+➌ 函数`map`发出一个键（一个包含了年和月的字符串，例如"2013-12或者"2014-1"）以及一个值（这一次观测中的动物数量）。
+
+➍ 函数`map`发出的键值对由键分组。对于所有有着同样键（就是有着同样年月）的键值对，函数`reduce`被调用一次。
+
+➎ 函数`reduce`把某个特定月份所有观测到的动物数量加了起来。
+
+➏ 最终的输出将写到集合`monthlySharkReport`中。
+
+举个例子，假设集合`observations`集合包含这两个文档：
+```JavaScript
+{
+  observationTimestamp: Date.parse("Mon, 25 Dec 1995 12:34:56 GMT"),
+  family:       "Sharks",
+  species:      "Carcharodon carcharias",
+  numAnimals:   3
+},
+{
+  observationTimestamp: Date.parse("Tue, 12 Dec 1995 16:17:18 GMT"),
+  family:       "Sharks",
+  species:      "Carcharodon taurus",
+  numAnimals:   4
+}
+```
+对每一个文档函数`map`将被调用一次，结果是`emit("1995-12", 3)`和`emit("1995-12", 4)`。之后，函数`reduce`被调用，即`reduce("1995-12", [3, 4])`，返回值为`7`。
+
+函数`map`与`reduce`某种程度上允许做的很有限。它们必须是*纯*函数，意味着它们只能使用使用传入的数据，它们不能执行额外的数据库查询，它们必须不能由任何副作用。这些限制允许数据库在任何地方，以任何顺序执行这些函数，并且在失败的时候可以重新执行。然而，它们依然强大：它们可以解析字符串，调用库函数，执行计算，等等等等。
+
+MapReduce是一个相当底层的编程模型，用于在一组设备上分布式执行。更高级的查询语言，比如SQL，可以被实现为MapReduce操作构成的管道（见第十章），但是也有许多SQL的分布式实现不使用MapReduce。注意，SQL没有被限制必须运行在单一设备上，而MapReduce也没有在分布式查询执行上处于垄断地位。
+
+在查询中可以使用JavaScript代码是高级查询的一个伟大功能，但是这不只限于MapReduce——一些SQL数据库也可以用JavaScript函数扩展。
+
+MapReduce的一个使用性问题是你必须写两个很小心配合的JavaScript函数，通常这比写单一一条查询语句要难。此外，声明式查询语言给查询优化器更大的优化空间。由于这些原因，MongoDB 2.2版添加了对声明式查询语言的支持，叫做*聚合管道*。在这样的语言中，同样的数鲨鱼查询会是这个样子的：
+```JavaScript
+db.observations.aggregate([
+  { $match: { family: "Sharks" } },
+  { $group: {
+    _id: {
+      year:   { $year:  "$observationTimestamp" },
+      month:  { $month: "$observationTimestamp" }
+    },
+    totalAnimals: { $sum: "$numAnimals" }
+  } }
+]);
+```
+聚合管线语言在表达能力上与SQL子集相当，但是它使用基于JSON的语法而不是SQL那种基于英语句子的语法；这种差别大概是品味问题吧。这个故事的核心精神是NoSQL系统也许意外发现自己在重新发明SQL，尽管表现形式有些差别。
