@@ -503,3 +503,110 @@ CREATE INDEX edges_heads ON edges (head_vertex);
 这些功能使图在数据建模中有着极强的灵活性，如图2-5所示。这张图中一部分事物如果用传统关系型模式定义的话表达会非常困难，比如不同国家不同种类的行政区划（法国是*省*与*大区*，而美国是*县*与*州*），怪异的历史比如国中之国（暂时忽略主权国家与民族国家这种错综复杂的问题），以及数据的粒度变化问题（Lucy现在的住址详细到了城市，而她的出生地只详细到了州）。
 
 你可以想象通过扩展图结构之后还可以包含Lucy与Alain的其它信息，亦或是其它人。比如，你可以使用它来指明他们过敏的食物（通过为每一个过敏原引入一个顶点，以及一个人与一个过敏原之间的边代表过敏），并且把过敏原与一组顶点连接起来从而表示哪种食物包含哪种物质。之后你可以写一个查询语句来查出每个人吃什么是安全的。图结构是演进友好的：随着你不断增加功能到你的应用，数据结构中的图结构可以轻松扩展以适应变化。
+
+### Cypher查询语言
+*Cypher*是一种针对属性图的声明式查询语言，为Neo4j图数据库设计。（这个名字来源于电影*黑客帝国*中的一个人物，与加密学中的密码没有任何关系。）
+
+示例2-3展示了将图2-5左半边插入图数据库的查询语句。图的剩余部分也可以以类似的方式添加，由于篇幅问题就省略了。每个顶点给定了一个符号名称，比如`USA`或者`Idaho`，于是查询的其它部分就可以用这些名字创建点与点之间的边，这里用到了一种箭头符号：`(Idaho) -[:WITHIN]-> (USA)`来创建边，其中标签为`WITHIN`，尾节点为`Idaho`，头节点为`USA`。
+
+*示例2-3 图2-5中的一部分数据，用Cypher查询语句表示*
+```
+CREATE
+  (NAmerica:Location  {name:'North America', type:'continenet'}),
+  (USA:Location       {name:'United States', type:'country'   }),
+  (Idaho:Location     {name:'Idaho',         type:'state'     }),
+  (Lucy:Person        {name:'Lucy' }),
+  (Idaho) -[:WITHIN]->  (USA)   -[:WITHIN]->  (NAmerica),
+  (Lucy)  -[:BORN_IN]-> (Idaho)
+```
+当图2-5中所有的顶点和边都被添加到数据库后，我们可以开始问一些有趣的问题：比如，*找出所有从美国移民到欧洲的人的名字*。更准确地说，这里我们想要找出所有那些有一个`BORN_IN`边指向一个美国地点，以及一个`LIVING_IN`边指向一个欧洲地点的顶点，然后返回每个这样顶点的`name`属性。
+
+示例2-4展示了如何用Cypher表达这样的查询。在`MATCH`语句中用到了一模一样的箭头符号去图中查找模式：`(person) -[:BORN_IN]-> ()`匹配任意两个被标签为`BORN_IN`的边连接起来的顶点。边的尾顶点绑定到了变量`person`，而头顶点是匿名的。
+
+*示例2-4 找出从美国移民到欧洲的人的Cypher查询语句*
+```
+MATCH
+  (person) -[:BORN_IN]->  () -[:WITHIN*0..]-> (us:Location {name:'United States'}),
+  (person) -[:LIVES_IN]-> () -[:WITHIN*0..]-> (eu:Location {name:'Europe'})
+RETURN person.name
+```
+查询语句可以被读作：
+>找出满足下面两个条件的任意顶点（命名为`person`）
+1. `person`有一条指向某个顶点的`BORN_IN`外向边。从那个顶点开始，你可以沿着一系列外向`WITHIN`边到达一个`Location`类型的顶点，它的属性`name`值为`United States`。
+2. 这个`person`顶点同时还有一个外向`LIVES_IN`边。沿着这条边以及之后一系列的`WITHIN`边可以到达一个`Location`类型的顶点，它的属性`name`值为`Europe`。
+
+>对于每个这样的`person`顶点，返回属性`name`。
+
+执行这个查询语句有好几种可能的方式。刚刚给出的描述指出你可以首先扫描数据库中所有的人，检查每个人的出生地和住址，然后返回那些符合条件的人。
+
+同样的，你可以从两个`Location`顶点入手反推。如果属性`name`有索引的话，或许你可以很快的找到代表美国和欧洲的两个顶点。然后你可以沿着所有内向`WITHIN`边分别找出在美国和欧洲的所有的地点（州、大区、城市，等等）。最后，你可以查找那些有内向`BORN_IN`或者`LIVES_IN`边到这些地点的人。
+
+由于声明式查询语言的典型特征，在写查询语句时你不需要指明具体的执行细节：查询优化器自动选择被认为是最有效率的策略，而你可以继续完成应用的剩余部分。
+
+### 用SQL进行图查询
+
+示例2-2指出图数据可以用关系型数据库呈现。但是如果我们把图数据放到一个关系型结构中，我们也可以用SQL查询它吗?
+
+答案是可以的，但是有些困难。在关系型数据库中，你通常事先知道在查询语句中你需要哪些连接。在图查询中，你也许需要遍历一定数量的边之后才能找到你要的顶点——也就是说，事先连接的数量是不确定的。
+
+在我们这个例子中，这个情况发生在Cypher查询语句的规则`() -[:WITHIN*0..]-> ()`中。一个人的`LIVES_IN`边可以指向任意类型的地点：街道、城市、区、地区、州等等。一个城市也许`WITHIN`一个地区，一个地区`WITHIN`一个州，一个州`WITHIN`一个国家等等。`LIVES_IN`边也许直接指向了你要找的地点顶点，亦或者在位置层次中隔着好几层。
+
+在Cypher中，`:WITHIN*0..`非常准确地表达了这个事实：它意味着“沿着`WITHIN`边，零或多次。”它与正则表达式中的`*`操作符很类似。
+
+从SQL:1999开始，查询语句中的变长遍历路径概念可以用称为*递归共用表表达式*（`WITH RECURSIVE`句法）表达。示例2-5展现了如何利用这个技术（被PostgreSQL、IBM DB2、Oracle和SQL Server支持）用SQL表达同一个查询——找出从美国移民到欧洲的人的名字。然而与Cypher相比，句法非常笨拙。
+
+*示例2-5 与示例2-4同样的查询语句，利用递归共用表表达式用SQL表达*
+```SQL
+WITH RECURSIVE
+
+  -- in_usa is the set of vertex IDs of all locations within the United States
+  in_usa(vertex_id) AS (
+    SELECT vertex_id FROM vertices WHERE properties->>'name' = 'United States' ➊
+    UNION
+      SELECT edges.tail_vertex FROM edges ➋
+        JOIN in_usa ON edges.head_vertex = in_usa.vertex_id
+        WHERE edges.label = 'within'
+  ),
+
+  -- in_europe is the set of vertexs IDs of all locations within in_europe
+  in_europe(vertex_id) AS (
+    SELECT vertex_id FROM vertices WHERE properties->>'name' = 'Europe' ➌
+    UNION
+      SELECT edges.tail_vertex FROM edges
+        JOIN in_europe ON edges.head_vertex = in_europe.vertex_id
+        WHERE edges.label = 'within'
+  ),
+
+  -- born_in_usa is the set of vertex IDs of all people born in the US
+  born_in_usa(vertex_id) AS ( ➍
+    SELECT edges.tail_vertex FROM edges
+      JOIN in_usa ON edges.head_vertex = in_usa.vertex_id
+      WHERE edges.label = 'born_in'
+  ),
+
+  -- lives_in_europe is the set of vertex IDs of all people living in in_europe
+  lives_in_europe(vertex_id) AS ( ➎
+    SELECT edges.tail_vertex FROM edges
+      JOIN in_europe ON edges.head_vertex = in_europe.vertex_id
+      WHERE edges.label = 'lives_in'
+  )
+
+SELECT vertices.properties->>'name'
+FROM vertices
+-- join to find those people who were both born in the US *and* live in in_europe
+JOIN born_in_usa      ON vertices.vertex_id = born_in_usa.vertex_id ➏
+JOIN lives_in_europe  ON vertices.vertex_id = lives_in_europe.vertex_id;
+```
+➊ 首先找出`name`属性值为`"United States"`的顶点，然后把它作为集合`in_usa`的首元素。
+
+➋ 追踪集合`in_usa`内顶点的所有内向`within`边，把他们添加到同一个集合直到所有内向`within`边都被访问过。
+
+➌ 对`name`属性值为`"Europe"`的顶点做同样的事，构成顶点集合`in_europe`。
+
+➍ 对集合`in_usa`内的每一个顶点，沿着内向`born_in`边找到出生于美国某个地点的人。
+
+➎ 类似地对集合`in_europe`内的每一个顶点，沿着内向`lives_in`边找到生活在欧洲的人。
+
+➏ 最终通过连接，交叉出生在美国的人的集合与生活在欧洲的人的集合。
+
+同样的查询如果用一种查询语言只需要4行而另外一种需要29行，那只能说明不同的数据模型是为了满足不同的使用场景而设计的。选择一个适合你的应用的数据模型至关重要。
