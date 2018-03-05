@@ -512,7 +512,7 @@ CREATE INDEX edges_heads ON edges (head_vertex);
 *示例2-3 图2-5中的一部分数据，用Cypher查询语句表示*
 ```
 CREATE
-  (NAmerica:Location  {name:'North America', type:'continenet'}),
+  (NAmerica:Location  {name:'North America', type:'continent'}),
   (USA:Location       {name:'United States', type:'country'   }),
   (Idaho:Location     {name:'Idaho',         type:'state'     }),
   (Lucy:Person        {name:'Lucy' }),
@@ -610,3 +610,89 @@ JOIN lives_in_europe  ON vertices.vertex_id = lives_in_europe.vertex_id;
 ➏ 最终通过连接，交叉出生在美国的人的集合与生活在欧洲的人的集合。
 
 同样的查询如果用一种查询语言只需要4行而另外一种需要29行，那只能说明不同的数据模型是为了满足不同的使用场景而设计的。选择一个适合你的应用的数据模型至关重要。
+
+### 三元存储与SPARQL
+三元存储模型与属性图模型大部分是等同的，只是用了不同的词汇来描述同一个的理念。然而它仍值得我们来讨论，因为为三元存储设计的众多工具与语言是你在构建应用时很有价值的补充。
+
+在一个三元存储中，所有的信息都是用非常简单的三部分陈述构成的：（*主体*，*断言*，*对象*）。举个例子，在三元（Jim，喜欢，香蕉），*Jim*是主体，*喜欢*是断言，而*香蕉*是对象。
+
+三元的主体对应图中的顶点。对象是以下两者之一：
+1. 一个原始类型值，比如字符串或者一个数字。在这种情况下，三元的断言与对象对应主体顶点属性的键与值。例如，（lucy，年龄，33）好比一个顶点*lucy*，属性`{"age:33"}`。
+2. 图中的另一个顶点。在这种情况下，断言是图中的一条边，主体是尾顶点，而对象是头顶点。比如说，在（lucy，嫁给，alain）中主体与对象lucy与alain都是顶点，而断言*嫁给*是连接两点的边。
+
+示例2-6展示了示例2-3中同样的数据，用格式*Turtle*，*Notation3 （N3）*的子集，写成了三元：
+
+*示例2-6 图2-5中数据的一个子集，用Turtle三元表示*
+```
+@prefix : <urn:example:>.
+_:lucy        a           :Person.
+_:lucy        :name       "Lucy"
+_:lucy        :bornIn     _:idaho.
+_:idaho       a           :Location.
+_:idaho       :name       "Idaho"
+_:idaho       :type       "state".
+_:idaho       :within     _:usa.
+_:usa         a           :Location.
+_:usa         :name       "United States".
+_:usa         :type       "country".
+_:usa         :within     _:namerica.
+_:namerica    a           :Location.
+_:namerica    :name       "North America".
+_:namerica    :type       "continent".
+```
+在这个厘子中，图的顶点被写作了`_:someName`。在这个文件之外这些名称没有任何意义；它存在只是因为不这样的话我们就不知道哪些三元指向了同一个顶点。当断言表示了一条边了之后，对象则是一个顶点，就如`_:idaho :within _:usa.`。当断言是一个属性时，对象就是字符串字面量，就像`_:usa :name "United States"`。
+
+同一个对象一次次的重复显得很啰嗦，幸好可以用分号来描述同一个主体的多个事物。这使得Turtle格式相当不错而且易读：见示例2-7。
+
+*示例2-7 表达示例2-6中数据的一种简洁方式*
+```
+_:lucy      a :Person;    :name "Lucy";           :bornIn _:idaho.
+_:idaho     a :Location;  :name "Idaho";          :type "state";    :within _:usa.
+_:usa       a :Location;  :name "United States";  :type "country";  :within _:namerica.
+_:namerica  a :Location;  :name "North America";  :type "continent".
+```
+
+#### 语义网
+如果你读了更多关于三元存储的文章，你也许会陷入关于*语义网*的海量文章中。三元存储数据模型是完全独立于语义网的——比如，Datomic是一种三元存储，它并没有声称与之有任何关系。然而两者在许多人的印象里是紧密联系在一起的，我们应当简要讨论一下它们。
+
+语义网从根本上是一个既简单又合理的想法：网站已经发布了文字和图片供人阅读，那为什么不也发布机器可读的数据供计算机读取呢？*资源描述框架*（RDF）原本作为一种手段，允许不同的网站以一致的格式发布数据，使得来自不同网站的数据汇成一张*数据的网*——一种互联网级别的“万物数据库。”
+
+不幸的是在21世纪初，语义网被过分宣传了并且直到今天都没有转变为现实的迹象，许多人因而愤世嫉俗。后来也有各种各样的缩写名词指代它，以及各种过于复杂的标准提案，当然，还有傲慢。
+
+然而如果不去看这些失败的地方，语义网项目还是贡献了相当多好的东西。三元可以是应用程序优良的内部数据模型，即使你没有任何兴趣发布任何RDF数据到语义网上。
+
+#### RDF数据模型
+在示例2-7中我们用到的Turtle语言是一种RDF数据人类可读的格式。有的时候RDF也会写成XML格式，完成一模一样的功能但是会更长一些——见示例2-8.Turtle/N3由于更易读所以更优先选择，而类似Apache Jena这样的工具可以在需要的时候自动在多种RDF格式之间转换。
+
+*示例2-8 示例2-7中的数据，用RDF/XML句法表达*
+```XML
+<rdf:RDF
+  xmlns="urn:example:"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+
+  <Location rdf:nodeID="idaho">
+    <name>Idaho</name>
+    <type>state</type>
+    <within>
+      <Location rdf:nodeID="usa">
+        <name>United States</name>
+        <type>country</type>
+        <within>
+          <Location rdf:nodeID="namerica">
+            <name>North America</name>
+            <type>continent</type>
+          </Location>
+        </within>
+      </Location>
+    </within>
+  </Location>
+
+  <Person rdf:nodeID="lucy">
+    <name>Lucy</name>
+    <bornIn rdf:nodeID="idaho" />
+  </Person>
+</rdf:RDF>
+```
+由于被设计为互联网级别的数据交换，RDF有一些奇特的地方。三元中的主体、断言与对象通常是URI。举个例子，一个断言也许是`<http://my-company.com/namespace#within>`或者`<http://my-company.com/namespace#lives_in>`这样的URI，而不是`WITHIN`或者`LIVES_IN`。这种设计背后的原因是你应该可以把你的数据与别人的数据结合起来，如果别人对词语`within`或者`lives_in`附上了不同的含意，这并不会导致冲突因为他们的断言实际上是`<http://other.org/foo#within>`或者`<http://other.org/foo#lives_in>`。
+
+URL`<http://my-company.com/namespace>`并不需要能解析为任何事物——从RDF的角度看，它只是一个命名空间。
