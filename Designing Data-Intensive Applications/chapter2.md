@@ -695,4 +695,35 @@ _:namerica  a :Location;  :name "North America";  :type "continent".
 ```
 由于被设计为互联网级别的数据交换，RDF有一些奇特的地方。三元中的主体、断言与对象通常是URI。举个例子，一个断言也许是`<http://my-company.com/namespace#within>`或者`<http://my-company.com/namespace#lives_in>`这样的URI，而不是`WITHIN`或者`LIVES_IN`。这种设计背后的原因是你应该可以把你的数据与别人的数据结合起来，如果别人对词语`within`或者`lives_in`附上了不同的含意，这并不会导致冲突因为他们的断言实际上是`<http://other.org/foo#within>`或者`<http://other.org/foo#lives_in>`。
 
-URL`<http://my-company.com/namespace>`并不需要能解析为任何事物——从RDF的角度看，它只是一个命名空间。
+URL`<http://my-company.com/namespace>`并不需要能解析为任何事物——从RDF的角度看，它只是一个命名空间。为了预防与`http://`潜在的冲突，本节的示例使用了无法解析的URI比如 `urn:example:within`。幸运的是，你只需要在文件顶部指明这个前缀一次，之后就不用再管它了。
+
+#### SPARQL查询语言
+*SPARQL*是一种为三元存储设计的查询语言，用到了RDF数据模型。（它是*SPARQL Protocol and RDF Query Language*的缩写，读作“sparkle。”）它的出现早于Cypher，并且因为Cypher的模式匹配借鉴了SPARQL，它们看起来非常类似。
+
+那么之前一模一样的查询——找出从美国移民到欧洲的人的名字——用SPARQL表达比用Cypher还要简洁（见示例2-9）。
+
+*示例2-9 与示例2-4一样的查询语句，用SPARQL表达*
+```
+PREFIX : <urn:example:>
+
+SELECT ?personName WHERE {
+  ?person :name ?personName.
+  ?person :bornIn / :within* / :name "United States".
+  ?person :livesIn / :within* / :name "Europe".
+}
+```
+结构是非常类似的。下边两个表达式是等价的（在SPARQL中变量名是由问号起始的）:
+```
+(person) -[: BORN_IN]-> () -[: WITHIN* 0..]-> (location)  # Cypher
+?person :bornIn / :within* ?location.                     # SPARQL
+```
+因为RDF不区分属性与边而只用断言，于是你可以用同样的句法匹配属性。在下面的表达式中，变量`usa`绑定到了任意一个`name`属性值为`"United States"`的顶点：
+```
+(usa {name:' United States'})   # Cypher
+?usa :name "United States".     # SPARQL
+```
+SPARQL是一个优秀的查询语言——即使语义网不能实现，对与应用内部使用来说也是一个强大的工具。
+
+> #### 比较图数据库与网络模型
+
+> 在“文档型数据库会重蹈覆辙么？”一节中我们讨论了CODASYL与关系型模型是如何解决IMS中多对多关系的。乍一看，CODASYL的网络模型看起来很像图模型。图数据库是CODASYL改头换面第二次出现么？不。它们在几个重要方面是不一样的：在CODASYL中，一个数据库是有模式定义的，它指明了哪些记录类型可以嵌套在那种记录类型中。在一个图数据库中，则没有这样的限制：任意的顶点可以有一条连接任意其他顶点的边。这使得应用程序有了更大的灵活性去适应不断变化的需求。在CODASYL中，到达一条特定的记录的唯一方式就是遍历一条访问路径。在图数据库中，你可以直接通过唯一ID引用它，或者通过索引找到有特定值的顶点。在CODASYL中，一条记录的孩子是一个有序集合，于是数据库需要去维护这个顺序（结果影响了存储布局）而插入新记录到数据库的应用程序需要考虑新纪录在集合中的位置。在图数据库中，顶点与边是无序的（只有在进行查询的时候才可以对结果排序）。在CODASYL中，所有的查询都是命令式的，模式定义写起来很困难而且很容易由于需求变化导致不工作。在图数据库中，如果你愿意你能用命令式风格写你的遍历代码，但是大多数图数据库也支持高级的声明式查询语言，比如Cypher或者SPARQL。
