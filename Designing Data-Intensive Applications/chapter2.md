@@ -727,3 +727,78 @@ SPARQL是一个优秀的查询语言——即使语义网不能实现，对与�
 > #### 比较图数据库与网络模型
 
 > 在“文档型数据库会重蹈覆辙么？”一节中我们讨论了CODASYL与关系型模型是如何解决IMS中多对多关系的。乍一看，CODASYL的网络模型看起来很像图模型。图数据库是CODASYL改头换面第二次出现么？不。它们在几个重要方面是不一样的：在CODASYL中，一个数据库是有模式定义的，它指明了哪些记录类型可以嵌套在那种记录类型中。在一个图数据库中，则没有这样的限制：任意的顶点可以有一条连接任意其他顶点的边。这使得应用程序有了更大的灵活性去适应不断变化的需求。在CODASYL中，到达一条特定的记录的唯一方式就是遍历一条访问路径。在图数据库中，你可以直接通过唯一ID引用它，或者通过索引找到有特定值的顶点。在CODASYL中，一条记录的孩子是一个有序集合，于是数据库需要去维护这个顺序（结果影响了存储布局）而插入新记录到数据库的应用程序需要考虑新纪录在集合中的位置。在图数据库中，顶点与边是无序的（只有在进行查询的时候才可以对结果排序）。在CODASYL中，所有的查询都是命令式的，模式定义写起来很困难而且很容易由于需求变化导致不工作。在图数据库中，如果你愿意你能用命令式风格写你的遍历代码，但是大多数图数据库也支持高级的声明式查询语言，比如Cypher或者SPARQL。
+
+#### 基础：Datalog
+
+*Datalog*是一种比SPARQL和Cypher更老的语言，学界在1980年代曾经广泛的研究过它。软件工程师很少知道它，然而它依然很重要，因为它提供了之后的查询语言构建的基础。在实践中，Datalog被应用在一部分数据系统中：比如，它是Datomic的查询语言，而Cascalog是为查询Hadoop大数据集而设计的Datalog实现。
+
+Datalog的数据模型与三元存储模型类似，更概括了一点。一个三元不再写成（*主体，断言，对象*），而是写作*断言*（*主体，对象*）。示例2-10展示了如何用Datalog写我们例子中的数据。
+
+*Example 2-10 图2-5中数据的一个子集，用Datalog事实表示*
+```
+name(namerica, 'North America').
+type(namerica, continent).
+
+name(usa, 'United States').
+type(usa, country).
+within(usa, namerica).
+
+name(idaho, 'Idaho').
+type(idaho, state).
+within(idaho, usa).
+
+name(lucy, 'Lucy').
+born_in(lucy, idaho).
+```
+Now that we have defined the data, we can write the same query as before, as shown in Example   2-11. It looks a bit different from the equivalent in Cypher or SPARQL, but don’t let that put you off. Datalog is a subset of Prolog, which you might have seen before if you’ve studied computer science. Example 2-11. The same query as Example   2-4, expressed in Datalog
+
+现在我们定义了数据，我们可以像之前一样写同一个查询，如示例2-11所示。看起来与用Cypher或者SPARQL写的有些差别，但是不要让它干扰你。Datalog是Prolog的子集，也许你在学习计算机科学的时候接触过它。
+
+*示例2-11 与示例2-4同样的查询，用Datalog表示*
+```
+within_recursive(Location, Name) :- name(Location, Name).   /* Rule 1 */
+
+within_recursive(Location, Name) :- within(Location, Via),  /* Rule 2 */
+                                    within_recursive( Via, Name).
+
+migrated(Name, BornIn, LivingIn) :- name(Person, Name),    /* Rule 3 */
+                                    born_in(Person, BornLoc),
+                                    within_recursive( BornLoc, BornIn),
+                                    lives_in( Person, LivingLoc),
+                                    within_recursive( LivingLoc, LivingIn).
+
+?- migrated(Who, 'United States', 'Europe').
+/* Who = 'Lucy'. */
+```
+Cypher直接用了`SELECT`，而Datalog每次只向前一小步。我们定义规则，告诉数据库新的断言：在这里，我们定义了两个新断言，`within_recursive`和`migrated`。这些断言不是储存在数据库中的三元，而是从数据或者其他规则衍生出来的。规则可以引用其它规则，就像函数可以调用其他函数或者递归调用它们自己一样。因此，复杂的查询语句可以每一次只构建一小段。在规则中，以大写字母开头的词语是变量，而断言匹配和Cypher与SPARQL是一样的。比如，`name(Location, Name)`当变量赋值为`Location = namerica`且`Name = 'North America'`将匹配三元`name(namerica, 'North America')`。
+
+于是应用规则的一种可能方式是这样的：
+1. `name(namerica, 'North America')`在数据库中，于是规则1生效。它生成了`within_recursive(namerica, 'North America')`。
+2. `within(usa, namerica)`在数据库中而上一步生成了`within_recursive(namerica, 'North America')`，于是规则2生效。它生成了`within_recursive(usa, 'North America')`。
+3. `within(idaho, usa)`在数据库中而上一步生成了`within_recursive(usa, 'North America')`，于是规则2生效。它生成了`within_recursive(idaho, 'North America')`。
+
+通过不断应用规则1和规则2，`within_recursive`断言可以告诉我们所有包含在数据库中的北美洲（或者其他任何地方）的地点。这个过程如图2-6所示。
+
+Now rule 3 can find people who were born in some location BornIn and live in some location LivingIn. By querying with  and , and leaving the person as a variable Who, we ask the Datalog system to find out which values can appear for the variable Who. So, finally we get the same answer as in the earlier Cypher and SPARQL queries. The Datalog approach requires a different kind of thinking to the other query languages discussed in this chapter, but it’s a very powerful approach, because rules can be combined and reused in different queries. It’s less convenient for simple one-off queries, but it can cope better if your data is complex.
+
+现在规则3可以找到出生在某个地点`BornIn`且生活在某个地点`LivingIn`的人。通过查询`BornIn = 'United States'`与`LivingIn = 'Europe'`，并且把人定义做变量`Who`，我们让Datalog系统找出哪些值可以作为`Who`。这样，最终我们得到了与先前Cypher与SPARQL查询一样的答案。相比于这一章中其他查询语言，Datalog需要一种非常不同的思考方式，然而这是一种非常强大的方式，因为规则可以在其他查询中组合、重用。对简单的单个查询来说不太方便，但是如果你的数据很复杂它可以应对的更好。
+
+## 总结
+Data models are a huge subject, and in this chapter we have taken a quick look at a broad variety of different models. We didn’t have space to go into all the details of each model, but hopefully the overview has been enough to whet your appetite to find out more about the model that best fits your application’s requirements. Historically, data started out being represented as one big tree (the hierarchical model), but that wasn’t good for representing many-to-many relationships, so the relational model was invented to solve that problem. More recently, developers found that some applications don’t fit well in the relational model either. New nonrelational “NoSQL” datastores have diverged in two main directions:
+
+数据模型是一个很大的主题，在这一章我们迅速地了解了许多种不同的模型。我们没有足够的篇幅去深入到每一种模型的细节，但是希望这样的概述足以激起你的胃口，从而更多地了解最适合你应用程序需求的模型。历史上，最一开始数据被表现为一个大树（层次模型），但是表现多对多关系的时候不够好，于是关系型模型被方面出来解决这个问题。最近，开发者们发现一些应用也不适合使用关系型模型了。新的非关系型“NoSQL”数据存储分成了两个主要方向：
+1. *文档数据库*定位于数据来源于独立文档且文档之间关系很少的场景。
+2. *图数据库*走了完全相反的路，定位于事物之间都有潜在联系的场景。
+
+全部三种模型（文档型，关系型与图）今天都广泛使用，并且在各自领域都非常优秀。模型都可以用另外一种模型模拟——比如，图数据可以用关系型数据库呈现——但是结果通常都很尴尬。这就是为什么我们针对不同的目的有不同的系统，而不是单个通用解决方案。
+
+文档型与图数据库的一个共同点是对存储的数据它们一般都不强制应用模式定义，这使得应用容易适应变化的需求。然而，你的应用很可能仍然假设数据具有一定的结构；这只是模式定义是明确的（写入时强制）还是隐含的（读取时处理）问题。
+
+每一种数据模型都有自己的查询语言和框架，我们也讨论了几个例子：SQL、MapReduce、MongoDB的聚合管线、Cypher、SPARQL以及Datalog。我们也触及了CSS与XSL/XPath，它们虽然不是数据库查询语言，但是有着有趣的相似性。
+
+虽然我们覆盖了一大块内容，但是仍然有许多数据模型没有提到。下边是一些简要的例子：
+* 处理基因组数据的研究者经常需要进行序列相似度搜索，也就是取一个长字符串（代表一个DNA分子）然后与一个数据库的类似，但是不相同字符串进行比对。这里记述的数据库没有一个可以处理这种用法，这也就是为什么研究者们开发了基因组专用的数据库软件，比如GenBank。
+* 粒子物理学家几十年来一直在做大数据风格的大规模数据分析，类似大型强子对撞机（LHC）这样的项目现在处理的都是数百PB的数据。在这样的规模下，需要定制化的解决方案从而防止硬件成本失控。
+* *全文搜索*可以说是一种常用于数据库的数据模型。信息检索是一个很大的专业主题，本书不会详细介绍，但我们将在第三章和第三部分介绍搜索索引。
+
+我们的讨论要暂时停在这里了。在下一章中我们将讨论在实施本章描述的数据模型时会用到的一些权衡。
