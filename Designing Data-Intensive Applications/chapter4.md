@@ -285,4 +285,26 @@ Thrift与Protocol Buffers依赖代码生成：模式定义完毕之后，可以�
 
 虽然Avro对静态类型编程语言提供了可选的代码生成功能，但是没有它也可以良好工作。如果你有一个对象容器文件（其中嵌入了写者的模式定义），你可以用Avro库打开它然后用看JSON文件的同样方式看这些数据。这个文件是自描述的，因为它包含了所有必须的元数据。
 
-This property is especially useful in conjunction with dynamically typed data processing languages like Apache Pig [26]. In Pig, you can just open some Avro files, start analyzing them, and write derived datasets to output files in Avro format without even thinking about schemas.
+这个特性在结合例如Apache Pig这样的动态类型数据处理语言时特别有用。在Pig中，你只需要打开Avro文件，开始分析它们，然后用Avro格式写出导出的数据集到输出文件而完全不用在意模式定义。
+
+### 模式的优点
+
+如我们所见，Protocol Buffers、Thrift以及Avro都使用模式定义来描述二进制编码格式。它们的模式定义语言要比XML模式或是JSON模式简单得多，后者支持许多细节验证规则（比如，“这个字段的字符串值必须符合这个正则表达式”或者“这个字段的整型数值必须在0到100之间”）。由于Protocol Buffers、Thrift以及Avro实现简单用起来也简单，它们已经支持了相当多数的编程语言。
+
+这些编码所基于的理念绝非新鲜。举个例子，它们与ASN.1，一种在1984年首次标准化了的模式定义语言，有许多共同点。它被用来定义了许多网络协议，比如它的二进制编码（DER）仍然被用来编码SSL证书（X.509）。ASN.1通过标签号码支持模式演进，这与Protocol Buffers以及Thrift类似。然而，它也很复杂，文档很差，所以ASN.1也许对于新的应用来说不是一个很好的选择。
+
+许多数据系统也为它们的数据实现了某些专有二进制编码。比如说，绝大部分关系型数据库都定义了网络协议，通过它可以发送查询请求到数据库并获取响应。这些协议通常是针对特定数据库的，而数据库厂商提供驱动（比如通过ODBC或者JDBC的API）把来自数据库网络协议的响应解码为内存数据结构。
+
+所以，我们看到虽然文本的数据格式例如JSON、XML以及CSV被广泛使用，基于模式定义的二进制编码也是一个可选项。它们有一些不错的特性：
+
+* 它们比诸多“二进制JSON”变种要紧凑得多，因为它们在编码后的数据中忽略字段名。
+
+* 模式定义是有价值的文档形式，由于解码时模式定义是必须的，你可以确定它一定是最新的（而人为维护的文档很容易与实际情况不符）。
+
+* 保存模式定义的数据库方便在部署任何东西之前检查模式定义变更的向前与向后兼容性。
+
+* 对于静态类型编程语言的用户，从模式定义生成代码的功能很有用，因为它允许在编译时进行类型检查。
+
+In summary, schema evolution allows the same kind of flexibility as schemaless/ schema-on-read JSON databases provide (see “Schema flexibility in the document model”), while also providing better guarantees about your data and better tooling.
+
+总的来说，模式定义演进提供了与无模式定义/读时模式定义JSON数据库提供的同等灵活性（见“文档模型中的模式定义灵活性”），同时提供了数据更好保证以及更好的工具。
