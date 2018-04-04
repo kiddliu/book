@@ -418,11 +418,11 @@ Cake太太，对于未来你能看多远？
 
 ### 多领机复制的拓扑结构
 
-复制的拓扑结构描述了写入请求从一个节点传到另外一个节点的通信路径。
+复制的拓扑结构描述了写入请求从一个节点传到另外一个节点的通信路径。如果你有两台领机，如图5-7一样，那只有一种合理的拓扑结构：领机1必须把所有的写入请求发送给领机2，反过来也一样。如果多于两个领机，许多不同的拓扑结构就有了可能。图5-8展示了一些例子。
 
-A replication topology describes the communication paths along which writes are propagated from one node to another. If you have two leaders, like in Figure   5-7, there is only one plausible topology: leader 1 must send all of its writes to leader 2, and vice versa. With more than two leaders, various different topologies are possible. Some examples are illustrated in Figure   5-8.
+*图5-8 多领机复制可以配置的三种示例拓扑结构*
 
-*Figure 5-8. Three example topologies in which multi-leader replication can be set up.*
+最一般的拓扑结构是多对多（图5-8【c】），在这种拓扑结构中每个领机把自己的吸入请求发送给其它所有领机。然而，更受限的拓扑结构也会被用到：举个例子，MySQL默认只支持环形拓扑结构，在这种拓扑结构中每个节点从一个节点接收写入请求并把
 
 The most general topology is all-to-all (Figure   5-8 [c]), in which every leader sends its writes to every other leader. However, more restricted topologies are also used: for example, MySQL by default supports only a circular topology [34], in which each node receives writes from one node and forwards those writes (plus any writes of its own) to one other node. Another popular topology has the shape of a star:v one designated root node forwards writes to all of the other nodes. The star topology can be generalized to a tree. 
 
