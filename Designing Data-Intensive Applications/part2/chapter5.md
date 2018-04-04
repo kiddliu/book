@@ -394,3 +394,40 @@ Cake太太，对于未来你能看多远？
 
 值得注意的是解决冲突通常应用在单个行或者单个文档这样的级别，而不是整个事务。因而，如果你有一个事务原子性地发起来几个不同地写入请求（见第七章），从解决冲突的目的看每个写入仍将被视为单独的写入。
 
+> 自动解决冲突
+>
+> 解决冲突的规则可以很快地变复杂，而自定义代码很容易出错。亚马逊经常由于解决冲突处理机制令人意外的效果而被诟病：有些时候，购物车解决冲突的逻辑会保留添加到购物车的项，但是不保留从购物车删除的项。因而，客户有些时候会看到先前被删除的项又出现了。
+>
+> 对于由并发的数据修改所导致冲突的自动解决已经有了一些很有意思的研究。值得一提的有：
+>
+> * *无冲突复制数据类型*（CRDT）是一系列可以同时被多人编辑的数据类型，集合，映射，有序链表，计数器等等，它们以合理的方式自动地解决冲突问题。一些CRDT已经在Riak 2.0版中实现了。
+>
+> *可以合并的持久性数据结构*显式地记录历史，类似Git版本控制系统，使用三路合并函数（而CRDT使用两路合并）。
+>
+> *运行转型*是如Etherpad和Google Docs这些协作编辑应用背后的冲突解决算法。它特别为项的有序链表的并发编辑而设计，例如构成文本文件的字符列表。
+>
+> 这些算法的实现在数据库中依然很年轻，但是在未来它们很有希望被集成到更多的复制数据系统中。自动解决冲突可以使应用程序处理多领机数据同步更加简单。
+
+#### 什么是冲突？
+
+有些类型的冲突是很明显的。在图5-7的示例中，两次写入请求同时修改了同一条记录的同一个字段，设置成了不同的值。毫无疑问这是冲突。
+
+其它类型的冲突可能更不容易检测到。举个例子，设想一下会议室预订系统：它记录了什么人什么时间预定了哪个房间。这个应用需要保证每个房间任何时间都只能被一组人预定（也就是说，同一个房间不能有任何交叉的预定计划）。在这种情况下，如果两个不同的预订计划同一时间预订了同一个房间，冲突就很可能发生了。即使应用程序首先检查了房间是否可用才允许用户发起预订请求，如果两个预订请求发生在两个不同的领机上，依然会有冲突。
+
+这个问题没有现成的答案，但是在后续章节我们会加深对这个问题的理解。在第七章我们会看到更多的冲突示例，而在第十二章我们会讨论在复制系统中检测和解决冲突的可扩展方法。
+
+### 多领机复制的拓扑结构
+
+复制的拓扑结构描述了写入请求从一个节点传到另外一个节点的通信路径。
+
+A replication topology describes the communication paths along which writes are propagated from one node to another. If you have two leaders, like in Figure   5-7, there is only one plausible topology: leader 1 must send all of its writes to leader 2, and vice versa. With more than two leaders, various different topologies are possible. Some examples are illustrated in Figure   5-8.
+
+*Figure 5-8. Three example topologies in which multi-leader replication can be set up.*
+
+The most general topology is all-to-all (Figure   5-8 [c]), in which every leader sends its writes to every other leader. However, more restricted topologies are also used: for example, MySQL by default supports only a circular topology [34], in which each node receives writes from one node and forwards those writes (plus any writes of its own) to one other node. Another popular topology has the shape of a star:v one designated root node forwards writes to all of the other nodes. The star topology can be generalized to a tree. 
+
+In circular and star topologies, a write may need to pass through several nodes before it reaches all replicas. Therefore, nodes need to forward data changes they receive from other nodes. To prevent infinite replication loops, each node is given a unique identifier, and in the replication log, each write is tagged with the identifiers of all the nodes it has passed through [43]. When a node receives a data change that is tagged with its own identifier, that data change is ignored, because the node knows that it has already been processed. 
+
+A problem with circular and star topologies is that if just one node fails, it can interrupt the flow of replication messages between other nodes, causing them to be unable to communicate until the node is fixed. The topology could be reconfigured to work around the failed node, but in most deployments such reconfiguration would have to be done manually. The fault tolerance of a more densely connected topology (such as all-to-all) is better because it allows messages to travel along different paths, avoiding a single point of failure. 
+
+On the other hand, all-to-all topologies can have issues too. In particular, some network links may be faster than others (e.g., due to network congestion), with the result that some replication messages may “overtake” others, as illustrated in Figure   5-9.
