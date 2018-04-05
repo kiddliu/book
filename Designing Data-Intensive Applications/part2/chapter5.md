@@ -422,12 +422,28 @@ Cake太太，对于未来你能看多远？
 
 *图5-8 多领机复制可以配置的三种示例拓扑结构*
 
-最一般的拓扑结构是多对多（图5-8【c】），在这种拓扑结构中每个领机把自己的吸入请求发送给其它所有领机。然而，更受限的拓扑结构也会被用到：举个例子，MySQL默认只支持环形拓扑结构，在这种拓扑结构中每个节点从一个节点接收写入请求并把
+最一般的拓扑结构是*多对多*（图5-8【c】），在这种拓扑结构中每个领机把自己的吸入请求发送给其它所有领机。然而，更受限的拓扑结构也会被用到：举个例子，MySQL默认只支持*环形拓扑结构*，在这种拓扑结构中每个节点从一个节点接收写入请求并把这些写入请求（外加任何自己的写入请求）转发给另一个节点。另外一种受欢迎的拓扑结构是*星形*的：一个制定的根节点转发所有的写入请求给所有其他节点。星形拓扑结构可以一般化为树。
 
-The most general topology is all-to-all (Figure   5-8 [c]), in which every leader sends its writes to every other leader. However, more restricted topologies are also used: for example, MySQL by default supports only a circular topology [34], in which each node receives writes from one node and forwards those writes (plus any writes of its own) to one other node. Another popular topology has the shape of a star:v one designated root node forwards writes to all of the other nodes. The star topology can be generalized to a tree. 
+在环形与星形拓扑结构中，写入请求也许需要经过好几个节点才能到达所有的副本。因此，节点需要转发它们从其它节点收到的数据变更。为了防止无限次的复制循环，每个节点被分配了唯一标识符，同时在复制日志中，每个写入请求都标记了所经节点的标识符。当节点收到了标记着自己的标识符的数据变更时，那个数据变更被忽略了，因为节点知道它已经被处理过了。
 
-In circular and star topologies, a write may need to pass through several nodes before it reaches all replicas. Therefore, nodes need to forward data changes they receive from other nodes. To prevent infinite replication loops, each node is given a unique identifier, and in the replication log, each write is tagged with the identifiers of all the nodes it has passed through [43]. When a node receives a data change that is tagged with its own identifier, that data change is ignored, because the node knows that it has already been processed. 
+环形与星形拓扑结构的问题在于如果一个节点故障了，这会终端其他节点之间复制消息的传递，导致它们在节点恢复之前没有办法通信。这时拓扑结构可以被重新配置来绕过故障节点，但是在绝大多数部署中这样的重新配置需要手动完成。连接更密集的拓扑结构对故障的容忍度更高，因为它允许消息从不同的路径传递，避免单节点故障的问题。
 
-A problem with circular and star topologies is that if just one node fails, it can interrupt the flow of replication messages between other nodes, causing them to be unable to communicate until the node is fixed. The topology could be reconfigured to work around the failed node, but in most deployments such reconfiguration would have to be done manually. The fault tolerance of a more densely connected topology (such as all-to-all) is better because it allows messages to travel along different paths, avoiding a single point of failure. 
+另一方面，多对多拓扑结构也是会有问题的。特别是，某些网络链接比其它的要快（比如因为网络拥堵），结果导致某些复制消息”赶超“了其它消息，如图5-9所示。
 
-On the other hand, all-to-all topologies can have issues too. In particular, some network links may be faster than others (e.g., due to network congestion), with the result that some replication messages may “overtake” others, as illustrated in Figure   5-9.
+*图5-9 在多领机复制中，写入请求在某些副本也许会以错误的顺序抵达*
+
+在图5-9中，客户端A向领机1中的表插入一行，而客户端B更新了领机3上的那行。然而，领机2也许是以不同的次序收到了这些写入请求：它有可能首先收到了更新（这种情况从它的角度看来，是在尝试更新数据库中不存在的行）而之后收到了对应的插入请求（它原本应该在更新请求前到达）。
+
+这是一个因果问题，与我们在“一致性前缀读取”一节看到的类似：更新请求依赖先前的插入请求，于是我们需要保证所有节点先处理插入请求，然后再是更新请求。只是为每个写入请求附上时间戳是不够的，因为没有办法相信时钟是完全同步了的，进而在领机2上正地对这些事件排序（见第八章）。
+
+为了正确地为这些事件排序，用到了一种叫做版本向量的技巧，我们会在本章稍后讨论它（见“检测并发写入”一节）。然而，冲突的检测技巧在许多多领机复制系统中实现得很差。举个例子，在本书写成时，PostgreSQL BDR不提供因果关系的写入请求，而针对MySQL的Tungsten Replicator甚至根本不去检测冲突。
+
+如果你在使用多领机复制系统，注意这些问题，仔细地阅读说明文档都是值得的，并且全面地测试你的数据库以保证它确实提供了你认为的必要的保证。
+
+## 无领机复制
+
+本章截至目前我们讨论的复制方法——单领机以及多领机复制——是基于这样一个理念的：客户端发送写入请求到一个节点（领机），然后数据库系统自行复制那个写入请求到其它副本。领机决定了处理写入请求的顺序，而从机以同样的次序应用领机的写入请求。
+
+一些数据存储系统选择了完全不同的方式，放弃了领机的概念而允许任何副本直接接受来自客户端的写入请求。一些早期的复制数据系统是无领机的，但是在关系型数据库的绝对统治时期这个理念被大部分遗忘了。它再一次变成流行的数据库架构实在亚马逊把它应用在了自家的*Dynamo*系统。Riak、Cassandra以及Voldemort都是受Dynamo启发的开源无领机模型数据存储，所以这一类数据库也被叫做*Dynamo风格*。
+
+在某些无领机的实现中，客户端直接发送写入请求到数个副本，而在其它时候，协调节点代替客户端做这些事情。然而，不像领机数据库，协调器不会强制特定的写入顺序。如我们所见的，这种设计上的差异对数据库的使用方式有着深刻的影响。
