@@ -620,12 +620,44 @@ LWW达成了最终趋近的目标，但是牺牲了持久性：如果对同一�
 
 因而，每当有两个操作A和B，就有三种可能：要么A发生在B之前，要么B发生在A之前，要么A与B是并发的。我们需要一个算法来告诉我们两个操作是否是并发的。如果一个操作在另一个操作之前发生，后一个操作应当覆盖前一个操作，但是如果操作是并发的，我们需要解决冲突了。
 
-> 并发，时间与相对性
+> **并发，时间与相对性**
 >
-> 
+> 看上去如果两个操作“同时”发生就应该被叫做并发——但是事实上，时间上是否重叠并不重要。由于分布式系统中的时钟问题，事实上很难分辨两件事是否刚刚好发生在同一时刻——这个问题我们会在第八章具体讨论。
+>
+> 对于定义并发，与准确的时间无关：只要两个操作不知道彼此我们就把它们叫做并发，完全不在乎它们发生的具体时间。人们有时把这个原则联系到物理学中的相对论，它引入了信息传递的速度无法超越光速的概念。所以，发生在相聚不远位置的两个事件，如果事件时间差比光在两地传递的事件还要短的话，是无法影响彼此的。
+>
+> 在计算机系统中，即使原则上光速允许一个操作影响另外一个操作，两个操作仍是并发的。举个例子，如果网络很慢或是当前中断了，两个操作可以相隔一段事件发生但仍是并发的，因为网络问题阻碍了一个操作知道另外一个操作的可能性。
 
-It may seem that two operations should be called concurrent if they occur “at the same time” — but in fact, it is not important whether they literally overlap in time. Because of problems with clocks in distributed systems, it is actually quite difficult to tell whether two things happened at exactly the same time — an issue we will discuss in more detail in Chapter   8. 
+#### 捕捉“在。。。之前发生”关系
 
-For defining concurrency, exact time doesn’t matter: we simply call two operations concurrent if they are both unaware of each other, regardless of the physical time at which they occurred. People sometimes make a connection between this principle and the special theory of relativity in physics [54], which introduced the idea that information cannot travel faster than the speed of light. Consequently, two events that occur some distance apart cannot possibly affect each other if the time between the events is shorter than the time it takes light to travel the distance between them. 
+让我们来看一个判断两个操作是否并发，或者一个在另一个之前发生的算法。简单起见，我们从数据库只有一个副本开始。一旦我们明白了在单个副本上是如何做到的，我们可以把这种方式一般化到拥有多个副本的无领机数据库。
 
-In computer systems, two operations might be concurrent even though the speed of light would in principle have allowed one operation to affect the other. For example, if the network was slow or interrupted at the time, two operations can occur some time apart and still be concurrent, because the network problems prevented one operation from being able to know about the other.
+图5-13展示了两个客户端并发地添加物品到同一个购物车中。（如果这个例子对于你来说太空洞了，那就假设两个空中交通管制中心同时添加飞行器到它们追踪的空域。）最初，购物车是空的。两个客户端对服务器发起了五次写入请求：
+
+1. 客户端1添加`milk`到购物车。这是对键的首次写入，所以服务器成功保存了它，并且设为版本1.服务器也把之传回给客户端，还有版本号。
+
+2. 客户端2添加`eggs`到购物车，不知道客户端1同时添加了`milk`（客户端以为`eggs`是购物车中唯一的物品）。服务器把这次写入设为版本2，并且把`eggs`和`milk`存储为两个独立的值。然后向客户端返回这两个值，还有版本号2。
+
+3. 客户端1，对客户端2的写入毫不知晓，想要添加`flour`到购物车，并认为当前购物车内的物品有`[milk, flour]`。它发送这个值到服务器，还有之前服务器给客户端1的版本号1.服务器通过版本号知道写入`[milk, flour]`将取代先前的值`[milk]`但是这与`[eggs]`是并发的。因而，服务器设`[milk, flour]`为版本3，覆盖了版本1的值`[milk]`，但是保留了版本2的值`[eggs]`并返回了两个余下的值给客户端。
+
+4. 同时，客户端2想要添加`ham`到购物车，不知道客户端1刚刚添加了`flour`。客户端2从最后一次客户端响应收到了两个值`[milk]`和`[eggs]`，所以客户端现在合并它们并且加入了`ham`形成一个新的值，`[eggs, milk, ham]`。它把这个值发送到服务器，还有之前的版本号2。服务器检测到了版本2覆盖了`[eggs]`但是与`[milk, flour]`是并发的，于是两个剩下的值是版本3`[milk, flour]`，以及版本4`[eggs, milk, ham]`。
+
+5. 最终，客户端1想要添加`bacon`。它之前收到了来自服务器的版本3`[milk, flour]`和`[eggs]`，于是它合并了这些，添加了`bacon`，然后发送了最终值`[milk, flour, eggs, bacon]`到服务器，还有版本号3。它覆盖了`[milk, flour]`（注意`[eggs]`已经在上一步被覆盖了）但是与`[eggs, milk, ham]`并发，所以服务器保留了这两个并发值。
+
+*图5-13 捕捉两个客户端并发编辑购物车时之间的因果关系*
+
+图5-13中操作之间的数据流如图5-14所示。箭头表示哪一个操作在另外哪一个操作之前发生，某种意义上后来的操作知道或者依赖前一个操作。在这个例子中，客户端从来没有与服务器上的数据完全同步过，因为总是有并发的另外一个操作发生。但是旧版本的值最终确实被覆盖了，没有写入请求被丢掉。
+
+*图5-14 图5-13中的因果关系图*
+
+值得注意的是服务器可以通过查看版本号判断两个操作是否并发——它不用去判断值本身（所以值可以是任意数据结构）。算法是这样工作的：
+
+* 服务器为每个键维护一个版本号，每一次键被写入时版本号增加1，并且新的版本号与新写入的值一起保存。
+
+* 当客户端读取键时，服务器返回所有没有被覆盖的值，以及最新的版本号。客户端必须在写入之前先读取键。
+
+* 当客户端写入键时，它必须带上前一次读取的版本号，还必须合并前一次读取到的所有值。（写入请求的响应类似一次读取，它返回所有当前的值，这使得我们可以把几个写入请求链起来，就像购物车的例子一样。）
+
+* 当服务器收到了有特定版本号的写入请求时，他可以覆盖所有有着那个版本号以及更老版本号的值（因为它知道这些值已经被合并入新值了），但是它必须用一个更高的版本号保存所有值（因为这些值与即将到来的写入是并行关系）。
+
+当写入请求包含着前一次读取的版本号时，这告诉了我们写入是基于先前哪个状态的。如果你要发起一个没有版本号的写入请求，它会与所有其它写入请求并发，所以他不会覆盖任何东西——它会被当作后续读取的值之一被返回回来。
