@@ -690,58 +690,58 @@ LWW达成了最终趋近的目标，但是牺牲了持久性：如果对同一�
 
 ## 总结
 
-In this chapter we looked at the issue of replication. Replication can serve several purposes: 
+本章我们了解了复制时的问题。复制可以是为了几个目的：
 
-High availability 
+*高可用性*
 
-Keeping the system running, even when one machine (or several machines, or an entire datacenter) goes down 
+保持系统运行，哪怕一台设备（或者数台设备，或是整个数据中心）故障
 
-Disconnected operation 
+*离线操作*
 
-Allowing an application to continue working when there is a network interruption 
+使得网络中断时程序可以继续工作
 
-Latency 
+*延迟*
 
-Placing data geographically close to users, so that users can interact with it faster 
+让数据更靠近用户，允许用户更快的使用数据
 
-Scalability 
+*可扩展性*
 
-Being able to handle a higher volume of reads than a single machine could handle, by performing reads on replicas 
+通过在副本上执行读取操作，可以应对比单个设备更高的读取量
 
-Despite being a simple goal — keeping a copy of the same data on several machines — replication turns out to be a remarkably tricky problem. It requires carefully thinking about concurrency and about all the things that can go wrong, and dealing with the consequences of those faults. At a minimum, we need to deal with unavailable nodes and network interruptions (and that’s not even considering the more insidious kinds of fault, such as silent data corruption due to software bugs). 
+尽管是一个简单的目标——在数台设备上保存同一份数据的拷贝——复制事实上是一个非常棘手的问题。它要求细心考虑并发以及所有可能出错的事，并且要处理这些故障的结果。至少，我们需要处理离线节点以及网络中断（而这还没有考虑更隐蔽的错误种类，比如软件bug导致的静默数据破坏）。
 
-We discussed three main approaches to replication: 
+我们讨论了三种主要的复制方式：
 
-Single-leader replication 
+单领机复制
 
-Clients send all writes to a single node (the leader), which sends a stream of data change events to the other replicas (followers). Reads can be performed on any replica, but reads from followers might be stale. 
+客户端发送所有写入请求到单个节点（领机），它发送数据变化事件的串流到其它副本（从机）。读取请求可以在任意副本上执行，但是读自从机的值有可能是旧的。
 
-Multi-leader replication 
+多领机复制
 
-Clients send each write to one of several leader nodes, any of which can accept writes. The leaders send streams of data change events to each other and to any follower nodes. 
+客户端发送写入请求到众多领机之一，它们任意一个都可以接受写入请求。领机发送数据变化事件的串流到其它领机以及其它从机节点。
 
-Leaderless replication 
+无领机复制
 
-Clients send each write to several nodes, and read from several nodes in parallel in order to detect and correct nodes with stale data.
+客户端发送写入请求到多个节点，并从多个节点并行读取从而检测和纠正有旧数据的节点。
 
-Each approach has advantages and disadvantages. Single-leader replication is popular because it is fairly easy to understand and there is no conflict resolution to worry about. Multi-leader and leaderless replication can be more robust in the presence of faulty nodes, network interruptions, and latency spikes — at the cost of being harder to reason about and providing only very weak consistency guarantees. 
+每一张方式都有各自的优势和劣势。单领机复制很流行，因为它很好理解也不用担心解决冲突。多领机以及无领机复制可以在有故障节点出现、网络中断以及延迟峰值的情况下更健壮——代价是难以推理，且只能提供非常弱的一致性保证。
 
-Replication can be synchronous or asynchronous, which has a profound effect on the system behavior when there is a fault. Although asynchronous replication can be fast when the system is running smoothly, it’s important to figure out what happens when replication lag increases and servers fail. If a leader fails and you promote an asynchronously updated follower to be the new leader, recently committed data may be lost. 
+复制可以是同步的也可以是异步的，当故障出现时它对系统行为的影响意义深远。虽然系统运行良好时异步复制可以很快，但是当复制延迟升高以及服务器故障时搞清楚发生了什么也是很重要的。如果领机故障而后提升一个异步更新的从机为新的主机，最近提交的数据有可能会丢失。
 
-We looked at some strange effects that can be caused by replication lag, and we discussed a few consistency models which are helpful for deciding how an application should behave under replication lag: 
+我们看到了一些导致复制延迟的奇怪效果，也讨论了一些对判断应用在复制延迟时应当如何行动的一致性模型：
 
-Read-after-write consistency 
+*读取后写入一致性*
 
-Users should always see data that they submitted themselves. 
+用户应当永远能看到自己提交的数据。
 
-Monotonic reads 
+*单调读取*
 
-After users have seen the data at one point in time, they shouldn’t later see the data from some earlier point in time. 
+当用户看到了某个事件点的数据，那么之后就不应该在看到更早时间的数据。
 
-Consistent prefix reads 
+*一致性前缀读取*
 
-Users should see the data in a state that makes causal sense: for example, seeing a question and its reply in the correct order. 
+用户应当看到数据是处于正常因果关系的状态的：比如说，以正确的次序看到问题以及对应的回答。
 
-Finally, we discussed the concurrency issues that are inherent in multi-leader and leaderless replication approaches: because they allow multiple writes to happen concurrently, conflicts may occur. We examined an algorithm that a database might use to determine whether one operation happened before another, or whether they happened concurrently. We also touched on methods for resolving conflicts by merging together concurrent updates. 
+最后，我们讨论了多领机与无领机复制方法天生固有的并发问题：因为它们允许好几个写入请求并发发生，冲突会产生。我们研究了数据库也许会用到的判断一个操作是否发生在另一个此操作之前，或者它们是否并发的算法。我们也了解了哦通过合并并发更新解决冲突的方法。
 
-In the next chapter we will continue looking at data that is distributed across multiple machines, through the counterpart of replication: splitting a large dataset into partitions.
+在下一张我们将继续了解分布在多个设备的数据，但是通过复制的对立面：把一个大数据集分解成分区。
