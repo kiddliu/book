@@ -661,3 +661,87 @@ LWW达成了最终趋近的目标，但是牺牲了持久性：如果对同一�
 * 当服务器收到了有特定版本号的写入请求时，他可以覆盖所有有着那个版本号以及更老版本号的值（因为它知道这些值已经被合并入新值了），但是它必须用一个更高的版本号保存所有值（因为这些值与即将到来的写入是并行关系）。
 
 当写入请求包含着前一次读取的版本号时，这告诉了我们写入是基于先前哪个状态的。如果你要发起一个没有版本号的写入请求，它会与所有其它写入请求并发，所以他不会覆盖任何东西——它会被当作后续读取的值之一被返回回来。
+
+#### 合并并发写入的值
+
+这个算法保证了没有数据会被静默地丢弃，但是不幸的是它要求客户端做了一些额外工作：如果几个操作并发发生，客户端需要做一些清理工作，合并并发写入的值。Riak把这些并发的值叫做*siblings*。
+
+合并siblings值本质上于多领机复制中冲突的解决是同一个问题，我们之前讨论过（见“处理写入冲突”）。一种简单的方法是基于版本号或者时间戳选出其中一个值（以最终写入为准），但是这以为着数据丢失。所以，在应用程序代码中你需要做一些更聪明的事。在购物车例子中，一种合并siblings的合理方式是把值联合起来。在图5-14中，两个最终的siblings是`[milk, flour, eggs, bacon]`和`[eggs, milk, ham]`；值得注意的是`milk`和`eggs`同时出现在两个值中，尽管它们只被写入了一次。合并后的值也可能是`[milk, flour, eggs, bacon, ham]`，完全没有重复值。
+
+然而，如果你要允许人们也可以从购物车中删除物品，而不只是添加东西，那么选择联合siblings值就无法得到正确的值了：如果你合并两个siblings购物车而一个物品只从二者之一删除了，那么被删掉的物品会重新出现在siblings联合中。为了防止这样的问题，一个物品被移除时不能简单的从数据库中删除；而应该是在合并siblings时，系统留下一个合适版本号的标记来指示该物品已经被移除了。这样的删除标记被叫做*墓碑*。（我们之前在“哈希索引”一节的日志压缩中见过墓碑）。
+
+由于在应用程序代码中合并siblings很复杂也很容易出错，现在已经设计出了一些可以自动执行合并的数据结构，如“自动解决冲突”一节讨论到的。举个例子，Riak的数据类型支持使用一系列CRDT的数据结构合理地自动合并siblings，包括保留删除。
+
+#### 版本向量
+
+图5-13中的例子只用到了单个副本。当有多个副本但是没有领机的时候它会怎么变化呢？
+
+图5-13shi用了单个版本号来捕捉操作之间的依赖关系，但是如果有多个副本并发接受写入的话就不够了。取而代之的应该是*每个副本*每个键都有版本号。每个副本处理写入请求增加自己的版本号，同时也记录来自其它副本它看到的版本号。这个信息指明哪些值要复写，哪些值要留下作为siblings。
+
+来自所有副本的版本号集合叫做*版本向量*。也有用一些类似的理念，但是最有趣的大概就是TODO: dotted version vector，它被用在Riak 2.0中。我们不会去深入细节，但是它工作的方式与我们在购物车示例中看到的很像。
+
+就像图5-13中的版本号一样，当值被读取时版本向量从数据库副本发送到客户端，而新值稍后被写入时需要再发回到数据库。（Riak把版本向量编码为字符串，叫它*因果上下文*。）版本向量使得数据库可以区别覆盖写入与并发写入。
+
+并且，就像单副本例子中那样，应用程序需要合并siblings。版本向量结构保证了从一个副本读取然后写回到另一个副本时是安全的。这样做会导致创建新的siblings，但是只要正确合并数据是不会丢失的。
+
+> 版本向量与向量时钟
+>
+> 版本向量有时也被叫做向量时钟，虽然它们并不完全是一回事。区别很细微——细节青查看引用【57，60，61】。简而言之，在比较副本状态的时候，应该使用版本向量。
+
+## 总结
+
+In this chapter we looked at the issue of replication. Replication can serve several purposes: 
+
+High availability 
+
+Keeping the system running, even when one machine (or several machines, or an entire datacenter) goes down 
+
+Disconnected operation 
+
+Allowing an application to continue working when there is a network interruption 
+
+Latency 
+
+Placing data geographically close to users, so that users can interact with it faster 
+
+Scalability 
+
+Being able to handle a higher volume of reads than a single machine could handle, by performing reads on replicas 
+
+Despite being a simple goal — keeping a copy of the same data on several machines — replication turns out to be a remarkably tricky problem. It requires carefully thinking about concurrency and about all the things that can go wrong, and dealing with the consequences of those faults. At a minimum, we need to deal with unavailable nodes and network interruptions (and that’s not even considering the more insidious kinds of fault, such as silent data corruption due to software bugs). 
+
+We discussed three main approaches to replication: 
+
+Single-leader replication 
+
+Clients send all writes to a single node (the leader), which sends a stream of data change events to the other replicas (followers). Reads can be performed on any replica, but reads from followers might be stale. 
+
+Multi-leader replication 
+
+Clients send each write to one of several leader nodes, any of which can accept writes. The leaders send streams of data change events to each other and to any follower nodes. 
+
+Leaderless replication 
+
+Clients send each write to several nodes, and read from several nodes in parallel in order to detect and correct nodes with stale data.
+
+Each approach has advantages and disadvantages. Single-leader replication is popular because it is fairly easy to understand and there is no conflict resolution to worry about. Multi-leader and leaderless replication can be more robust in the presence of faulty nodes, network interruptions, and latency spikes — at the cost of being harder to reason about and providing only very weak consistency guarantees. 
+
+Replication can be synchronous or asynchronous, which has a profound effect on the system behavior when there is a fault. Although asynchronous replication can be fast when the system is running smoothly, it’s important to figure out what happens when replication lag increases and servers fail. If a leader fails and you promote an asynchronously updated follower to be the new leader, recently committed data may be lost. 
+
+We looked at some strange effects that can be caused by replication lag, and we discussed a few consistency models which are helpful for deciding how an application should behave under replication lag: 
+
+Read-after-write consistency 
+
+Users should always see data that they submitted themselves. 
+
+Monotonic reads 
+
+After users have seen the data at one point in time, they shouldn’t later see the data from some earlier point in time. 
+
+Consistent prefix reads 
+
+Users should see the data in a state that makes causal sense: for example, seeing a question and its reply in the correct order. 
+
+Finally, we discussed the concurrency issues that are inherent in multi-leader and leaderless replication approaches: because they allow multiple writes to happen concurrently, conflicts may occur. We examined an algorithm that a database might use to determine whether one operation happened before another, or whether they happened concurrently. We also touched on methods for resolving conflicts by merging together concurrent updates. 
+
+In the next chapter we will continue looking at data that is distributed across multiple machines, through the counterpart of replication: splitting a large dataset into partitions.
