@@ -95,3 +95,47 @@ Cassandra采取了两种分区策略的折中方案。Cassandra中的表声明�
 然而，把写入分到了不同的键，任何读取请求现在需要做更多的工作了，因为它们必须读取所有100个键的数据并结合起来。这个技巧也需要更多的记录，对少数热键添加随机数字才有意义；对于大多数有着很低写入吞吐量的键这样做会产生没有必要的消耗。因而，你也需要某种记录哪些键被分开的方式。
 
 也许在未来，数据系统可以自动检测并补偿倾斜的工作负载；但现在，你需要为你自己的应用程序仔细权衡。
+
+## 分区与二级索引
+
+我们目前讨论了的分区方法依赖键值对数据模型。如果记录只用主键访问过，我们可以从那个键判定分区，并且用它把读取和写入请求发送到键所对应的分区。
+
+如果牵扯到二级索引的话情况就变得更复杂了（见“其它索引结构”）。二级索引通常不用来唯一标识一条记录，而只是一种搜索特定值的方式：找出用户123所有的操作，找到所有包含词语`hogwash`的文章，找出所有红色的车，等等等等。
+
+二级索引是关系型数据库的核心产品，它在文档型数据库中也很常见。许多键值对存储（比如HBase与Voldemort）不支持二级索引是因为它增加了实现的复杂度，但是有些（比如Riak）开始支持它，因为它对于数据模型很有用。最后，二级索引是Solr和Elasticsearch等搜索服务器的*存在理由*。
+
+二级索引的问题在于它们不能整齐地映射到分区。用二级索引对数据库分区有两种主要方式：基于文档分区与基于术语分区。
+
+### 根据文档对二级索引分区
+
+举个例子，设想你在运营一个售卖二手车的网站（如图6-4所示）。每个清单有一个唯一ID——叫它*文档ID*吧——然后你用文档ID把数据库分区了（举个例子，从0到499的ID在分区0，从500到999的ID在分区1，以此类推）。
+
+你想让用户通过搜索找车，允许他们通过颜色和厂商过滤，所以你需要`color`和`make`的二级索引（在文档型数据库中这些可以是字段；在关系型数据库中这些是列）。如果你声明了索引，数据库可以自动建立索引。举个例子，每当一台红色的车被录入数据库，数据库分区自动把它添加到索引条目`color:red`的文档ID列表中。
+
+*图6-4 根据文档对二级索引分区*
+
+在这种索引方法中，每个分区是完全独立的：每个分区维护自己的二级索引，只覆盖分区中的文档。它不关心在其它分区储存了什么数据。每当需要写入数据库时——添加、删除或更新文档——你只需要处理包含着你在写入的文档ID的分区。由于这个原因，文档分区的索引也被称为*本地索引*（与下一节将描述的*全局索引*相对应）。
+
+然而，从文档分区的索引读取需要很小心：除非对文档ID做了特殊处理，那么没有理由把所有具有特定颜色或特定品牌的车都会在同一个分区中。在图6-4中，红色的车出现在了分区0和分区1。因而，如果你要搜索红色的车，你需要发送查询请求到所有分区，然后把返回的所有结果结合起来。
+
+这种查询分了区的数据库的方法叫做*分散/收集*，而这使得向二级索引发起读取查询的代价非常高。即使并发查询分区，分散/收集很容易出现尾部延迟放大效应（详见“实践中的百分位”）。然而，它被广泛地使用着：MongoDB、Riak、Cassandra、Elasticsearch、SolrCloud以及VoltDB全都使用文档分了区的二级索引。大多数数据库厂商推荐你构建自己的分区方法于是二级索引查询可以由单个分区响应，但是这部总是可能的，尤其是在你在单个查询中使用了多个二级索引（比如说同时按颜色和厂商过滤车）。
+
+*图6-5 根据术语对二级索引分区*
+
+### 根据术语对二级索引分区
+
+Rather than each partition having its own secondary index (a local index), we can construct a global index that covers data in all partitions. However, we can’t just store that index on one node, since it would likely become a bottleneck and defeat the purpose of partitioning. A global index must also be partitioned, but it can be partitioned differently from the primary key index. 
+
+Figure   6-5 illustrates what this could look like: red cars from all partitions appear under color:red in the index, but the index is partitioned so that colors starting with the letters a to r appear in partition 0 and colors starting with s to z appear in partition 1. The index on the make of car is partitioned similarly (with the partition boundary being between f and h). 
+
+We call this kind of index term-partitioned, because the term we’re looking for determines the partition of the index. Here, a term would be color:red, for example. The name term comes from full-text indexes (a particular kind of secondary index), where the terms are all the words that occur in a document. 
+
+As before, we can partition the index by the term itself, or using a hash of the term. Partitioning by the term itself can be useful for range scans (e.g., on a numeric property, such as the asking price of the car), whereas partitioning on a hash of the term gives a more even distribution of load. 
+
+The advantage of a global (term-partitioned) index over a document-partitioned index is that it can make reads more efficient: rather than doing scatter/ gather over all partitions, a client only needs to make a request to the partition containing the term that it wants. However, the downside of a global index is that writes are slower and more complicated, because a write to a single document may now affect multiple partitions of the index (every term in the document might be on a different partition, on a different node). 
+
+In an ideal world, the index would always be up to date, and every document written to the database would immediately be reflected in the index. However, in a term-partitioned index, that would require a distributed transaction across all partitions affected by a write, which is not supported in all databases (see Chapter   7 and Chapter   9). 
+
+In practice, updates to global secondary indexes are often asynchronous (that is, if you read the index shortly after a write, the change you just made may not yet be reflected in the index). For example, Amazon DynamoDB states that its global secondary indexes are updated within a fraction of a second in normal circumstances, but may experience longer propagation delays in cases of faults in the infrastructure [20]. 
+
+Other uses of global term-partitioned indexes include Riak’s search feature [21] and the Oracle data warehouse, which lets you choose between local and global indexing [22]. We will return to the topic of implementing term-partitioned secondary indexes in Chapter   12.
