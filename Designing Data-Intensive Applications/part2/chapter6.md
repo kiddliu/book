@@ -122,20 +122,100 @@ Cassandra采取了两种分区策略的折中方案。Cassandra中的表声明�
 
 *图6-5 根据术语对二级索引分区*
 
-### 根据术语对二级索引分区
+### 根据字词对二级索引分区
 
-Rather than each partition having its own secondary index (a local index), we can construct a global index that covers data in all partitions. However, we can’t just store that index on one node, since it would likely become a bottleneck and defeat the purpose of partitioning. A global index must also be partitioned, but it can be partitioned differently from the primary key index. 
+与其每个分区有自己的二级索引（*本地索引*），我们可以构建覆盖所有分区数据的*全局索引*。然而，我们不能把这个索引只存在一个节点上，因为这很有可能变成平静进而失去了分区的意义。全局索引也必须被分区，但是可以与主键索引的分区不同。
 
-Figure   6-5 illustrates what this could look like: red cars from all partitions appear under color:red in the index, but the index is partitioned so that colors starting with the letters a to r appear in partition 0 and colors starting with s to z appear in partition 1. The index on the make of car is partitioned similarly (with the partition boundary being between f and h). 
+图6-5展示了这大概会是什么样子：来自所有分区的红色的车都出现在索引的`color:red`下边，但是索引也被分区了，于是以字母*a*到*r*的开头的颜色出现在分区0，以字母*s*到*z*开头的颜色出现在分区1。汽车厂商的索引也是类似分区的（分区边界为*f*和*h*）。
 
-We call this kind of index term-partitioned, because the term we’re looking for determines the partition of the index. Here, a term would be color:red, for example. The name term comes from full-text indexes (a particular kind of secondary index), where the terms are all the words that occur in a document. 
+我们把这种索引叫做*按字词分区*的索引，因为我们寻找的字词决定了索引的分区。在这个例子中，字词是`color:red`。*字词*这个名字来源于全文索引（一种特别的二级索引），在这里字词就是所有文章中出现过的词。
 
-As before, we can partition the index by the term itself, or using a hash of the term. Partitioning by the term itself can be useful for range scans (e.g., on a numeric property, such as the asking price of the car), whereas partitioning on a hash of the term gives a more even distribution of load. 
+跟先前一样，我们可以按字词对索引分区，或者使用字词的哈希值。按字词本身分区在范围扫描（比如，对一个数字属性，比如询问车价）时很有用，而按字词的哈希值分区可以得到更平均分配的负载。
 
-The advantage of a global (term-partitioned) index over a document-partitioned index is that it can make reads more efficient: rather than doing scatter/ gather over all partitions, a client only needs to make a request to the partition containing the term that it wants. However, the downside of a global index is that writes are slower and more complicated, because a write to a single document may now affect multiple partitions of the index (every term in the document might be on a different partition, on a different node). 
+相比于按文档分区的索引，全局（按字词分区）索引的优点是它让读取更有效率：与其在所有分区上做分散/收集，客户端只需要向包含所需字词的分区发起请求。然而，全局索引的缺点在于写入更慢更复杂了，因为对单个文档的写入请求现在会影响索引的多个分区（文档中的每一个字词都会在不同的分区，不同的节点上）。
 
-In an ideal world, the index would always be up to date, and every document written to the database would immediately be reflected in the index. However, in a term-partitioned index, that would require a distributed transaction across all partitions affected by a write, which is not supported in all databases (see Chapter   7 and Chapter   9). 
+在理想的世界里，索引总是最新的，每个写入数据库的文档会立即反映在索引中。然而，在按字词分区的索引中，这需要一个横跨所有受写入影响的分区的分布式的事务，但是并不是所有数据库都支持它（见第七与第九章）。
 
-In practice, updates to global secondary indexes are often asynchronous (that is, if you read the index shortly after a write, the change you just made may not yet be reflected in the index). For example, Amazon DynamoDB states that its global secondary indexes are updated within a fraction of a second in normal circumstances, but may experience longer propagation delays in cases of faults in the infrastructure [20]. 
+在实践中，对全局二级索引的更新经常是异步的（那就是，如果你在写入之后没多久读取，你刚刚做出的变更不一定会体现在索引中）。举个例子，亚马逊的DynamoDB声明它的全局二级索引正常情况下会在几分之一秒钟内更新，但是如果基础架构发生故障，就很可能遇到更长的传播延迟。
 
-Other uses of global term-partitioned indexes include Riak’s search feature [21] and the Oracle data warehouse, which lets you choose between local and global indexing [22]. We will return to the topic of implementing term-partitioned secondary indexes in Chapter   12.
+全局按字词分区的索引的其它用途包括了Riak的搜索功能以及Oracle的数据仓库，它允许你在本地与全局索引之间选择。我们会在第十二章回到如何实现按字词分区的二级索引这个主题。
+
+## 再平衡分区
+
+随着时间的推移，数据库中的东西发生变化：
+
+* 查询吞吐量增加，所以你要添加更多的CPU来应对负载。
+
+* 数据集大小增加，所以你要添加更多的磁盘和内存来储存它。
+
+* 设备故障，而其它设备需要接管故障设备的职责。
+
+所以这些变化都需要把数据和请求从一个节点转移到另一个节点。把负载从集群中的一个系欸按移到另一个的过程叫做*再平衡*。
+
+不管使用的是哪种分区方法，再平衡通常都要求满足某些最低标准：
+
+* 再平衡之后，负载（数据存储，读写请求）应当在集群中的节点之间平均分配。
+
+* 当再平衡进行时，数据库应当继续接受读写请求。
+
+* 只有必须移动的数据才会在节点之间转移，从而使得再平衡过程很快并且只占用最少的带宽与磁盘I/O负载。
+
+### 再平衡的策略
+
+There are a few different ways of assigning partitions to nodes [23]. Let’s briefly discuss each in turn.
+
+#### 如何不这样做: 哈希值余N
+
+当按照键的哈希值分区时，我们之前说过（图6-3）最好把可能的哈希值分成不同的范围，并把每个范围指定到一个分区（比如，如果0 ≤ *hash(key)* < b<sub>0</sub>就把键指定到分区0，如果b<sub>0</sub> ≤ *hash(key)* < b<sub>1</sub>就指定到分区1，以此类推）。
+
+也许你回想为什么不用*取余*（许多编程语言中的%操作符）。举个例子，*hash(key) mod* 10会返回会返回0到9之间的数字（如果我们把哈希值写作十进制的数字，那么哈希值取10的*余数*就是最后一位数字）。如果我们有10个节点，编号0到9，这看起来是一种指定键到节点的简单方法。
+
+*取N余数*的方式问题在于如果节点数N发生变化，大多数的键需要从一个节点转移到另外一个节点。举个例子，假如*hash(key)* = 123456。如果一开始有10个节点，那么键最初在节点6（因为对123456取10的余数是6）。当增加到11个节点的时候，键需要转移到节点3（对123456取11的余数是3），当增加到12个节点的时候，键需要转移到节点0（对123456取12的余数是0）。如此频繁地迁移使得再平衡代价相当得高。
+
+我们需要一种只在必要时移动数据地方法。
+
+#### 固定数量的分区
+
+幸运的是，有一个相当简单的解决方案：创建比节点数多很多的分区，并指定数个分区到每个节点。举个例子，一个运行在拥有10个节点的集群上的数据库从一开始就被拆分成1000个分区，于是大约100个分区被指定到了各个节点上。
+
+现在，如果一个节点被添加到急群众，新节点可以从每个已有节点上偷一些分区过来，直到分区再一次平均分配为止。这个过程如图6-6所示。如果一个节点从集群中删除，同样的事情会反着发生。
+
+
+
+Only entire partitions are moved between nodes. The number of partitions does not change, nor does the assignment of keys to partitions. The only thing that changes is the assignment of partitions to nodes. This change of assignment is not immediate — it takes some time to transfer a large amount of data over the network — so the old assignment of partitions is used for any reads and writes that happen while the transfer is in progress.
+
+*Figure 6-6. Adding a new node to a database cluster with multiple partitions per node.*
+
+In principle, you can even account for mismatched hardware in your cluster: by assigning more partitions to nodes that are more powerful, you can force those nodes to take a greater share of the load. 
+
+This approach to rebalancing is used in Riak [15], Elasticsearch [24], Couchbase [10], and Voldemort [25]. 
+
+In this configuration, the number of partitions is usually fixed when the database is first set up and not changed afterward.
+
+Although in principle it’s possible to split and merge partitions (see the next section), a fixed number of partitions is operationally simpler, and so many fixed-partition databases choose not to implement partition splitting. Thus, the number of partitions configured at the outset is the maximum number of nodes you can have, so you need to choose it high enough to accommodate future growth. However, each partition also has management overhead, so it’s counterproductive to choose too high a number. 
+
+Choosing the right number of partitions is difficult if the total size of the dataset is highly variable (for example, if it starts small but may grow much larger over time). Since each partition contains a fixed fraction of the total data, the size of each partition grows proportionally to the total amount of data in the cluster. If partitions are very large, rebalancing and recovery from node failures become expensive. But if partitions are too small, they incur too much overhead. The best performance is achieved when the size of partitions is “just right,” neither too big nor too small, which can be hard to achieve if the number of partitions is fixed but the dataset size varies.
+
+#### Dynamic Partitioning
+
+For databases that use key range partitioning (see “Partitioning by Key Range”), a fixed number of partitions with fixed boundaries would be very inconvenient: if you got the boundaries wrong, you could end up with all of the data in one partition and all of the other partitions empty. Reconfiguring the partition boundaries manually would be very tedious. 
+
+For that reason, key range– partitioned databases such as HBase and RethinkDB create partitions dynamically. When a partition grows to exceed a configured size (on HBase, the default is 10   GB), it is split into two partitions so that approximately half of the data ends up on each side of the split [26]. Conversely, if lots of data is deleted and a partition shrinks below some threshold, it can be merged with an adjacent partition. This process is similar to what happens at the top level of a B-tree (see “B-Trees”). 
+
+Each partition is assigned to one node, and each node can handle multiple partitions, like in the case of a fixed number of partitions. After a large partition has been split, one of its two halves can be transferred to another node in order to balance the load. In the case of HBase, the transfer of partition files happens through HDFS, the underlying distributed filesystem [3]. 
+
+An advantage of dynamic partitioning is that the number of partitions adapts to the total data volume. If there is only a small amount of data, a small number of partitions is sufficient, so overheads are small; if there is a huge amount of data, the size of each individual partition is limited to a configurable maximum [23]. 
+
+However, a caveat is that an empty database starts off with a single partition, since there is no a priori information about where to draw the partition boundaries. While the dataset is small — until it hits the point at which the first partition is split — all writes have to be processed by a single node while the other nodes sit idle. To mitigate this issue, HBase and MongoDB allow an initial set of partitions to be configured on an empty database (this is called pre-splitting). In the case of key-range partitioning, pre-splitting requires that you already know what the key distribution is going to look like [4, 26]. 
+
+Dynamic partitioning is not only suitable for key range– partitioned data, but can equally well be used with hash-partitioned data. MongoDB since version 2.4 supports both key-range and hash partitioning, and it splits partitions dynamically in either case.
+
+#### Partitioning proportionally to nodes
+
+With dynamic partitioning, the number of partitions is proportional to the size of the dataset, since the splitting and merging processes keep the size of each partition between some fixed minimum and maximum. On the other hand, with a fixed number of partitions, the size of each partition is proportional to the size of the dataset. In both of these cases, the number of partitions is independent of the number of nodes. 
+
+A third option, used by Cassandra and Ketama, is to make the number of partitions proportional to the number of nodes — in other words, to have a fixed number of partitions per node [23, 27, 28]. In this case, the size of each partition grows proportionally to the dataset size while the number of nodes remains unchanged, but when you increase the number of nodes, the partitions become smaller again. Since a larger data volume generally requires a larger number of nodes to store, this approach also keeps the size of each partition fairly stable. 
+
+When a new node joins the cluster, it randomly chooses a fixed number of existing partitions to split, and then takes ownership of one half of each of those split partitions while leaving the other half of each partition in place. The randomization can produce unfair splits, but when averaged over a larger number of partitions (in Cassandra, 256 partitions per node by default), the new node ends up taking a fair share of the load from the existing nodes. Cassandra 3.0 introduced an alternative rebalancing algorithm that avoids unfair splits [29]. 
+
+Picking partition boundaries randomly requires that hash-based partitioning is used (so the boundaries can be picked from the range of numbers produced by the hash function). Indeed, this approach corresponds most closely to the original definition of consistent hashing [7] (see “Consistent Hashing”). Newer hash functions can achieve a similar effect with lower metadata overhead [8].
