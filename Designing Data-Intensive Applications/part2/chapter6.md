@@ -180,42 +180,84 @@ There are a few different ways of assigning partitions to nodes [23]. Let’s br
 
 现在，如果一个节点被添加到急群众，新节点可以从每个已有节点上偷一些分区过来，直到分区再一次平均分配为止。这个过程如图6-6所示。如果一个节点从集群中删除，同样的事情会反着发生。
 
+只有整个分区在节点之间转移。分区的数量不会变化，键所指定的分区也不会。唯一会变得是分区指定的节点。这种指定关系的变化不会立即生效——通过网络传输大量数据需要花些时间——所以旧的指定分区用来服务传输过程中任何读写请求。
 
+*图6-6 添加新节点到每个节点有多个分区的数据库集群*
 
-Only entire partitions are moved between nodes. The number of partitions does not change, nor does the assignment of keys to partitions. The only thing that changes is the assignment of partitions to nodes. This change of assignment is not immediate — it takes some time to transfer a large amount of data over the network — so the old assignment of partitions is used for any reads and writes that happen while the transfer is in progress.
+原则上，你甚至可以说明集群中为什么有不匹配的硬件：通过指定更多的分区到性能更强大的节点，你可以强制这些节点承担更多的负载。
 
-*Figure 6-6. Adding a new node to a database cluster with multiple partitions per node.*
+这种再平衡方式用在了Riak、Elasticsearch、Couchbase以及Voldemort。
 
-In principle, you can even account for mismatched hardware in your cluster: by assigning more partitions to nodes that are more powerful, you can force those nodes to take a greater share of the load. 
+在这种配置环境中，分区的数量通常在数据库建立时就固定了，之后也不会改变。
 
-This approach to rebalancing is used in Riak [15], Elasticsearch [24], Couchbase [10], and Voldemort [25]. 
+虽然原则上拆分合并分区是可能的（见下一节），然而固定数目的分区运营时更简单，于是许多固定分区的数据库选择不实现分区拆分。因而，在一开始配置的分区数量就是你可以拥有的最大节点数，所以你需要选择足够高的数字来适应未来的增长。然而，每个分区还有管理消耗，所以数字选得太高也会适得其反。
 
-In this configuration, the number of partitions is usually fixed when the database is first set up and not changed afterward.
+如果数据集的总大小是非常动态的话（比如，开始很小但是随着时间推移变得非常大），选择正确的分区数量很困难。因为每个分区都包含了所有数据固定的一小部分，每个分区的大小与集群中的数据总量成比例增长。如果分区非常大，再平衡以及节点崩溃的恢复都会变得代价很高。但是如果分区太小，也会导致大量的消耗。最好的性能实在分区大小“刚刚好”的时候实现的，既不会太大也不会太小，如果分区的数量固定但是数据集大小变化的话这是很难实现的。
 
-Although in principle it’s possible to split and merge partitions (see the next section), a fixed number of partitions is operationally simpler, and so many fixed-partition databases choose not to implement partition splitting. Thus, the number of partitions configured at the outset is the maximum number of nodes you can have, so you need to choose it high enough to accommodate future growth. However, each partition also has management overhead, so it’s counterproductive to choose too high a number. 
+#### 动态分区
 
-Choosing the right number of partitions is difficult if the total size of the dataset is highly variable (for example, if it starts small but may grow much larger over time). Since each partition contains a fixed fraction of the total data, the size of each partition grows proportionally to the total amount of data in the cluster. If partitions are very large, rebalancing and recovery from node failures become expensive. But if partitions are too small, they incur too much overhead. The best performance is achieved when the size of partitions is “just right,” neither too big nor too small, which can be hard to achieve if the number of partitions is fixed but the dataset size varies.
+对于使用按键的范围分区（见“按键的范围分区”）的数据库，固定数量的固定边界分区会非常的不方便：如果边界错了，最终有可能所有数据在一个分区而其它分区都是空的。手动重新配置分区边界又会非常枯燥。
 
-#### Dynamic Partitioning
+由于这个原因，按键的范围分区的数据库，比如HBase和RethinkDB，会动态创建分区。当一个分区的大小超过了设定值（在HBase上，默认大小是10GB），它被拆分为两个分区从而各大约一半的数据在新的分区内。相反地，如果大量数据被删除而分区缩小到低于某个阙值，他会并入相邻地分区。这个过程与B树顶层发生的事类似（见“B树”一节）。
 
-For databases that use key range partitioning (see “Partitioning by Key Range”), a fixed number of partitions with fixed boundaries would be very inconvenient: if you got the boundaries wrong, you could end up with all of the data in one partition and all of the other partitions empty. Reconfiguring the partition boundaries manually would be very tedious. 
+每个分区被指定到一个节点，而每个节点可以处理多个分区，与固定数量分区的案例类似。大分区被拆分之后，其中的一半可以被转移到另一个节点以平衡负载。在HBase的案例中，分区文件的传输通过HDFS，底层的分布式文件系统进行的。
 
-For that reason, key range– partitioned databases such as HBase and RethinkDB create partitions dynamically. When a partition grows to exceed a configured size (on HBase, the default is 10   GB), it is split into two partitions so that approximately half of the data ends up on each side of the split [26]. Conversely, if lots of data is deleted and a partition shrinks below some threshold, it can be merged with an adjacent partition. This process is similar to what happens at the top level of a B-tree (see “B-Trees”). 
+动态分区的优点是分区的数量适应总数据量。如果只有很少量的数据，那么很小数量的分区就足够了，消耗也很小；如果有海量的数据，每个分区的大小被限制为可配置的最大值。
 
-Each partition is assigned to one node, and each node can handle multiple partitions, like in the case of a fixed number of partitions. After a large partition has been split, one of its two halves can be transferred to another node in order to balance the load. In the case of HBase, the transfer of partition files happens through HDFS, the underlying distributed filesystem [3]. 
+然而，需要注意的是空数据库最初只有一个分区，因为没有关于在哪里划分分区边界的*先验*信息。当数据集很小的时候——直到它足够大导致第一个分区被拆分——所有的写入请求需要被单个节点处理，同时其它节点是闲置的。为了缓解这个问题，HBase与MongoDB允许在空数据库中配置初始分区集合（这叫做*预拆分*）。在按键的范围分区的场景中，预分区要求你预先知道之后键分布的情形。
 
-An advantage of dynamic partitioning is that the number of partitions adapts to the total data volume. If there is only a small amount of data, a small number of partitions is sufficient, so overheads are small; if there is a huge amount of data, the size of each individual partition is limited to a configurable maximum [23]. 
+动态分区不止适用于按键的范围分区的数据，也同样使用于按哈希值分区的数据。MongoDB自2.4版同时支持按键的范围分区以及按哈希值分区，两种状况下都会动态地拆分分区。
 
-However, a caveat is that an empty database starts off with a single partition, since there is no a priori information about where to draw the partition boundaries. While the dataset is small — until it hits the point at which the first partition is split — all writes have to be processed by a single node while the other nodes sit idle. To mitigate this issue, HBase and MongoDB allow an initial set of partitions to be configured on an empty database (this is called pre-splitting). In the case of key-range partitioning, pre-splitting requires that you already know what the key distribution is going to look like [4, 26]. 
+#### 按节点的比例分区
 
-Dynamic partitioning is not only suitable for key range– partitioned data, but can equally well be used with hash-partitioned data. MongoDB since version 2.4 supports both key-range and hash partitioning, and it splits partitions dynamically in either case.
+对于动态分区来说，分区数量与数据集的大小成比例，因为拆分与合并过程将每个分区的大小保持在某个固定的大小之间。另一方面，对于固定数目的分区来说，每个分区的大小与数据集的大小成比例。在两种情况下，分区的数量与节点数量无关。
 
-#### Partitioning proportionally to nodes
+第三种选择，Cassandra与Ketama在用的，是让分区的数量与节点的数量成比例——换句话说，每个节点有固定数量的分区。在这种情况下，每个分区大小增长的速度与数据集的大小成比例而节点数量不变，但是当你增加节点数量时，分区再一次变小了。由于更大的数据量一般需要更多的节点来存储，所以这种方式也将每个分区的大小保持稳定。
 
-With dynamic partitioning, the number of partitions is proportional to the size of the dataset, since the splitting and merging processes keep the size of each partition between some fixed minimum and maximum. On the other hand, with a fixed number of partitions, the size of each partition is proportional to the size of the dataset. In both of these cases, the number of partitions is independent of the number of nodes. 
+当新节点加入集群时，它随机地选区固定数量的已有分区进行拆分，之后获取一半新分区的控制权而剩下的一半原封不动。随机过程有可能产生不公平的拆分结果，但是当平均发生在大量分区上（在Cassandra，默认每个节点有256个分区）时，新节点最终从已有节点上获得公平份额的负载。Cassandra 3.0版本还引入了另一种再平衡算法防止不平衡的拆分。
 
-A third option, used by Cassandra and Ketama, is to make the number of partitions proportional to the number of nodes — in other words, to have a fixed number of partitions per node [23, 27, 28]. In this case, the size of each partition grows proportionally to the dataset size while the number of nodes remains unchanged, but when you increase the number of nodes, the partitions become smaller again. Since a larger data volume generally requires a larger number of nodes to store, this approach also keeps the size of each partition fairly stable. 
+随机选择分区边界需要使用基于哈希的分区方法（于是边界可以选择由哈希函数生成的数字的范围）。确实，这种方式最符合一致哈希的最初定义（见“一致哈希”一节）。更新的哈希函数可以再更低的元数据消耗下实现类似的效果。
 
-When a new node joins the cluster, it randomly chooses a fixed number of existing partitions to split, and then takes ownership of one half of each of those split partitions while leaving the other half of each partition in place. The randomization can produce unfair splits, but when averaged over a larger number of partitions (in Cassandra, 256 partitions per node by default), the new node ends up taking a fair share of the load from the existing nodes. Cassandra 3.0 introduced an alternative rebalancing algorithm that avoids unfair splits [29]. 
+### 运营：自动还是手动再平衡
 
-Picking partition boundaries randomly requires that hash-based partitioning is used (so the boundaries can be picked from the range of numbers produced by the hash function). Indeed, this approach corresponds most closely to the original definition of consistent hashing [7] (see “Consistent Hashing”). Newer hash functions can achieve a similar effect with lower metadata overhead [8].
+考虑再平衡的时候有一个很重要的问题还没有考虑：再平衡是自动发生的还是手动发生的？
+
+完全自动再平衡（系统在没有任何管理员参与的情况下自动决定什么时候把分区从一个节点转移到另一个节点）与完全手动再平衡（分区位于哪个节点的指定是明确由管理员配置的，并且只在管理员明确再配置时才会变化）之间是有渐变的。举个例子，Couchbase、Riak以及Voldemort自动生成建议的分区分配，但是需要管理员提及之后才生效。
+
+完全自动的再平衡可以很方便，因为对于正常的维护来说少了许多运营工作。然而，它可能很难预测。再平衡是一个代价高昂的操作，因为他需要重新路由请求并且在节点之间转移大量数据。如果不仔细做，这个过程会过载网络或者节点，从而在再平衡过程中损害其它请求的性能。
+
+这种自动化过程与自动故障检测结合起来会很危险。举个例子，假设一个节点过载了，暂时对请求响应地很慢。其它节点认为过载节点已经崩溃了，从而自动再平衡了整个集群从而把负载移走了。这会给过载的节点，其他节点以及网络带来额外负担——使得整个情况更糟糕，甚至导致级联故障。
+
+由于这个原因，再平衡过程中引入人的参与是一件好事。相比于完全自动的过程它会更慢，但是这可以预防运营的意外问题。
+
+## 请求的路由
+
+现在我们把我们的数据集分区到了多台设备上的数个节点上了。但是还有一个悬而未决的问题：当客户端要发起请求时，它怎么知道要连接哪个节点？由于分区被再平衡了，分区到节点的分配也会变。需要有人知道所有这些变化来回答这个问题：如果我要读写键“foo”，我需要连接哪个IP地址与端口？
+
+这是更一般性问题*服务发现*的一个例子，并不只限于数据库。任何一个可以从网络访问的软件都有这个问题，尤其是当它针对高可用性（在多台机器上运行的冗余配置）的时候。许多公司都写了他们自己的内部服务发现工具，其中许多都已经开源了。
+
+在高级层面上，这个问题有几种不同的解决办法（如图6-7所示）：
+
+1. 允许客户端访问任意节点（比如，通过循环负载均衡器）。如果节点碰巧拥有请求应用的分区，它可以直接处理请求；否则，它把请求转发到对应的节点，接受应答然后传递给客户端。
+
+2. 首先发送所有来自客户端的请求到路由层，它判断哪个节点应该处理哪个请求并相应地转发出去。路由层本身不处理任何请求，它只是一个知道分区信息的负载均衡器。
+
+3. 要求客户端知道分区信息以及分区到节点的分配信息。在这种情况下，客户端可以直接连接到对应的节点，不需要任何中间层。
+
+在所有的情况下，核心问题都是：做出路由选择的组件时如何了解分区到节点分配信息的变化的？
+
+*图6-7 发送请求到正确节点的三种不同方式。*
+
+这是个很有挑战的问题，因为所有的参与者的同意是很重要的——否则请求被发送到错误的节点也不能正确地处理。有协议可以达成在分布式系统中的共识，但是它们很难正确地实现（见第九章）。
+
+许多分布式数据系统依赖一个独立的协调服务，比如ZooKeeper，来追踪集群信息，如图6-8所示。每个节点在ZooKeeper中注册自己，然后ZooKeeper维护权威的分区到节点的映射关系。其它参与者，比如路由层或者是知道分区信息的客户端，可以在ZooKeeper中订阅这个信息。每当分区变更了拥有者，或者节点被添加或是删除，ZooKeeper通知路由层从而保证路由信息是最新的。
+
+*图6-8 使用ZooKeeper来追踪分区到节点的分配关系。*
+
+举个例子，领英的Espresso系统使用Helix做集群管理（而它又依赖于ZooKeeper），它实现了如6-8所示的路由层。HBase、SolrCloud以及Kafka也使用ZooKeeper跟踪分区分配信息。MongoDB有更简单的架构，但是它依赖自己的*配置服务器*实现以及*mongos*守护进程作为作为路由层。
+
+Cassandra和Riak走了另外一条路：它们在节点之间使用*流言协议*来传播集群状态中任何的变化。请求可以被发送到任意节点，而后那个节点把它们转发到请求的分区的对应节点（图6-7中的方法1）.这种模型使得数据库节点更复杂，但是避免了对外部协调服务，比如ZooKeeper的依赖。
+
+Couchbase不会自动再平衡，这简化了设计。通常它会配置一个路由层叫做*moxi*，它从集群中的节点了解路由的变化。
+
+当使用了路由层或者发送请求到了随机节点，客户端仍然需要找出需要连接的IP地址。相比于分区到节点的分配它们不会变得那么频繁，所以一般用DNS就足够了。
