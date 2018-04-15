@@ -30,7 +30,7 @@
 
 那么如何判断你需不需要事务呢？为了回答这个问题，我们首先需要理解到底事务可以提供什么样的安全性保证，以及随之而来的代价是什么。虽然乍一看事务简单明了，但是实际上有很多细微但是重要的细节在起作用。
 
-在这一张，我们会研究许多会出错的事情，并且探索数据库用来针对这些问题的算法。我们会特别深入到并发控制的领域，讨论可能发生的各种种类的竞争条件以及数据库是如何实现比如*提交读*、*快照隔离*以及*可序列化*这样的隔离界别的。
+在这一张，我们会研究许多会出错的事情，并且探索数据库用来针对这些问题的算法。我们会特别深入到并发控制的领域，讨论可能发生的各种种类的竞争条件以及数据库是如何实现比如*提交读*、*快照隔离*以及*可串行化*这样的隔离界别的。
 
 这一章既适用于单节点数据库也适用于分布式数据库；在第八章我们将着重讨论只在分布式系统中出现的难题。
 
@@ -90,44 +90,128 @@ ACID一致性的理念是关于数据的某些描述（不变量）必须始终�
 
 #### 隔离性
 
-Most databases are accessed by several clients at the same time. That is no problem if they are reading and writing different parts of the database, but if they are accessing the same database records, you can run into concurrency problems (race conditions). 
+大多数数据库可以同时为多个客户端访问。如果它们读写的是数据库不同的部分那是没问题的，然而如果它们访问的是同一个数据库条目，就会碰到并发问题（竞争条件）。
 
-Figure   7-1 is a simple example of this kind of problem. Say you have two clients simultaneously incrementing a counter that is stored in a database. Each client needs to read the current value, add 1, and write the new value back (assuming there is no increment operation built into the database). In Figure   7-1 the counter should have increased from 42 to 44, because two increments happened, but it actually only went to 43 because of the race condition. 
+图7-1是这种问题的一个简单示例。假设有两个客户端在持续递增存储在数据库中的计数器值。每个客户端需要读取当前的值，增加1，然后把新值写回去（假设数据库没有内建递增操作）。在图7-1中计数器应该从42增加到了44，因为发生了两次递增，但是由于竞争条件实际上只到了43。
 
-Isolation in the sense of ACID means that concurrently executing transactions are isolated from each other: they cannot step on each other’s toes. The classic database textbooks formalize isolation as serializability, which means that each transaction can pretend that it is the only transaction running on the entire database. The database ensures that when the transactions have committed, the result is the same as if they had run serially (one after another), even though in reality they may have run concurrently [10].
+ACID意义上的隔离性是指并发执行的事务相互之间是隔离的：它们不会互相干预彼此的操作。经典数据库教科书把隔离性形式化为可串行化性，意味着每个事务都可以假装自己是整个数据库上唯一正在执行的事务。数据库保证在事务提交之后，结果与它们顺序执行（一个接一个）的结果是一样的，哪怕实际上它们是并发执行的。
 
-*Figure 7-1. A race condition between two clients concurrently incrementing a counter.*
+*图7-1. 两个并发递增计数器的客户端之间的竞争条件。*
 
-However, in practice, serializable isolation is rarely used, because it carries a performance penalty. Some popular databases, such as Oracle 11g, don’t even implement it. In Oracle there is an isolation level called “serializable,” but it actually implements something called snapshot isolation, which is a weaker guarantee than serializability [8, 11]. We will explore snapshot isolation and other forms of isolation in “Weak Isolation Levels”.
+然而在实际当中，可串行化的隔离性很少用到，因为它会带来性能损失。一些流行的数据库，比如Oracle 11g，根本没实现它。在Oracel数据库中有一个隔离界别叫做“可串行化”，但是实际上实现的是*快照隔离*，相比可串行化它是一个弱保证。我们会在“弱隔离级别”一节中探索快照隔离以及其它形式的隔离。
 
 #### 持久性
 
-The purpose of a database system is to provide a safe place where data can be stored without fear of losing it. Durability is the promise that once a transaction has committed successfully, any data it has written will not be forgotten, even if there is a hardware fault or the database crashes. 
+数据库系统存在的目的是为了提供一个安全的储存数据的场所而不用担心丢失它。持久性承诺一旦事务提交成功，它写入的任何数据不会被遗忘，哪怕是发生了硬件故障或是数据库崩溃了。
 
-In a single-node database, durability typically means that the data has been written to nonvolatile storage such as a hard drive or SSD. It usually also involves a write-ahead log or similar (see “Making B-trees reliable”), which allows recovery in the event that the data structures on disk are corrupted. In a replicated database, durability may mean that the data has been successfully copied to some number of nodes. In order to provide a durability guarantee, a database must wait until these writes or replications are complete before reporting a transaction as successfully committed. 
+在单节点数据库中，持久性通常意味着数据库已经被写入到诸如机械硬盘或是固态硬盘这样的非易失性存储中。它常常也涉及到预写入日志或是类似的东西（见“让B树变得可靠”一节），它在磁盘上的数据结构被破坏之后可以进行恢复。在一个复制数据库中，持续性意味着数据被成功地复制到了一定数量的节点。为了保证持久性，数据库必须等待所有的写入或是复制完成以后才能报告事务成功地提交了。
 
-As discussed in “Reliability”, perfect durability does not exist: if all your hard disks and all your backups are destroyed at the same time, there’s obviously nothing your database can do to save you.
+就如“可靠性”一节讨论到地，完美地持久性是不存在的：如果所有的硬盘与所有的备份同时被破坏了，显然没有什么数据库可以帮到你的了。
 
-> **Replication and Durability**
+> **复制与持久性**
 >
-> Historically, durability meant writing to an archive tape. Then it was understood as writing to a disk or SSD. More recently, it has been adapted to mean replication. Which implementation is better? 
+> 历史上，持久性是指写入到备份磁带上。之后被理解为写入到磁盘或是固态硬盘。最近，它开始意味着复制。那种实现更好呢？
 >
-> The truth is, nothing is perfect:
+> 事实是，没有什么是完美的：
 >
-> * If you write to disk and the machine dies, even though your data isn’t lost, it is inaccessible until you either fix the machine or transfer the disk to another machine. Replicated systems can remain available.
+> * 如果写入到了磁盘而设备死掉了，虽然数据没有丢失，但是直到你修复了设备或是把磁盘转移到另一台设备，数据都是无法访问的。复制了的系统则继续可用。
 >
-> * A correlated fault — a power outage or a bug that crashes every node on a particular input — can knock out all replicas at once (see “Reliability”), losing any data that is only in memory. Writing to disk is therefore still relevant for in-memory databases.
+> * 相关性故障——断电或是由于特定输入导致所有节点崩溃的bug——可以立刻让所有副本下线（见“可靠性”一节），丢失任何还在内存中的数据。因此对于内存数据库来说，写入到磁盘仍然是相关的操作。
 >
-> * In an asynchronously replicated system, recent writes may be lost when the leader becomes unavailable (see “Handling Node Outages”).
+> * 在异步复制系统中，当领机离线时最新的写入请求都会丢失（见“处理节点离线”一节）。
 >
-> * When the power is suddenly cut, SSDs in particular have been shown to sometimes violate the guarantees they are supposed to provide: even fsync isn’t guaranteed to work correctly [12]. Disk firmware can have bugs, just like any other kind of software [13, 14].
+> * 当电源突然被掐断，固态硬盘尤其表现出有时会违反它们本应提供的保证：哪怕`fsync`也无法保证工作正常。硬盘固件会有bug，就像任何其它类型的软件一样。
 >
-> * Subtle interactions between the storage engine and the filesystem implementation can lead to bugs that are hard to track down, and may cause files on disk to be corrupted after a crash [15, 16]. 
+> * 存储引擎与文件系统实现之间的细微互动可以导致很难跟踪的bug，并会导致磁盘上的文件在崩溃后被破坏。 
 >
-> * Data on disk can gradually become corrupted without this being detected [17]. If data has been corrupted for some time, replicas and recent backups may also be corrupted. In this case, you will need to try to restore the data from a historical backup.
+> * 磁盘上的数据会慢慢地不知不觉地被破坏。如果数据被破坏已经有了一段时间，副本以及最新地备份也可能已经破坏了。在这种情况下，你需要尝试从一份老的备份中恢复数据。
 >
-> * One study of SSDs found that between 30% and 80% of drives develop at least one bad block during the first four years of operation [18]. Magnetic hard drives have a lower rate of bad sectors, but a higher rate of complete failure than SSDs.
+> * 一份关于固态硬盘的研究发现在使用的头四年中产生至少一个坏块的可能性在30%到80%。机械硬盘相比于固态硬盘有更低的坏扇区率，但是有更高的完全故障率。
 >
-> * If an SSD is disconnected from power, it can start losing data within a few weeks, depending on the temperature [19].
+> * 如果SSD被断电，在几个礼拜之内就会开始丢失数据，而它取决于温度。
 >
-> In practice, there is no one technique that can provide absolute guarantees. There are only various risk-reduction techniques, including writing to disk, replicating to remote machines, and backups — and they can and should be used together. As always, it’s wise to take any theoretical “guarantees” with a healthy grain of salt.
+> 在实践中，没有任何一种技巧可以提供绝对的保证。只有各种降低风险的技巧，包括写入到磁盘，复制到远端设备以及备份——且它们可以也应该一起使用。与往常一样，用怀疑的眼光看待任何理论性的“保证”总是明智的。
+
+### 单对象与多对象操作
+
+概括一下，在ACID中，原子性与隔离性描述了在同一个事务中如果客户端发起了几个写入请求数据库应该做什么：
+
+*原子性*
+
+如果在执行一系列写入中途发生了错误，事务应当中止，而已经完成了的写入应当被丢弃。换句话说，数据库通过提供全有或者全无的保证，使你不用担心发生部分故障。
+
+*隔离性*
+
+并发执行的事务不应该互相干预彼此。举个例子，如果一个事务发起了数个写入请求，之后的另一个事务应该要么看到所有的写入，要么什么都没看到，但是不会看到其中一部分。
+
+这些定义都假设你一次要修改数个对象（行，文档，记录）。如果好几份数据需要保持同步的话就经常需要这种*多对象事务*。图7-2展示了一个来自电子邮件应用的例子。为了显示用户未读邮件的数量，你会进行类似这样的查询：
+
+```SQL
+SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
+```
+
+然而，如果邮件太多你会发现这个查询太慢了，于是决定把未读消息的数量储存在一个单独的字段里（一种反规范化）。现在，每当收到一封新邮件，你也必须为未读计数器加一，而每当一封邮件被标记为已读，你也必须为唯独计数器减一。
+
+在图7-2中，用户2经历了一个异常现象：邮箱列表显示有一封未读邮件，但是因为计数器加一还没发生，计数器显示零个未读邮件。隔离性可以通过保证用户2要么同时看到插入的邮件和更新了的计数器，要么什么都没有，而不是一个不一致的中间状态来预防这个问题。
+
+*图7-2 违反隔离性：一个事务读到了另一个事务未提交的写入（“脏读”）。*
+
+图7-3展示了对原子性的需要：如果在事务的过程中发生了错误，邮箱的内容与未读计数器就变得不同步了。在一个原子性事务中，如果对计数器的更新失败了，事务会终止且被插入的邮件会回滚。
+
+*图7-3 原子性保证如果发生了错误任何来自事务之前的写入都会被撤销，以避免不一致的状态。*
+
+多对象事务需要某些方式判定哪些读写操作属于同一个事务。在关系型数据库中，这通常是基于客户端到数据库服务器的TCP连接完成的：在任意特定的连接上，在`BEING TRANSACTION`与`COMMIT`之间的所有语句被认为属于同一个事务。
+
+另一方面，许多非关系型数据库没有这种把操作分组到一起的方式。即使有多对象的API（举个例子，键值对存储可以有一次操作更新好几个键值的*多赋值*操作），但是这不意味它有事务的语义：这个命令有可能成功更新了某些键值而其它的失败了，使数据库出在了部分更新的状态。
+
+#### 单对象写入
+
+当单对象被更新时原子性与隔离性也适用。举个例子，假设你正在写入20KB大的JSON文档到数据库：
+
+* 如果网络连接在发送10KB之后中断了，数据库会存储这无法解析的10KB JSON片段么？
+
+* 如果数据库正在覆盖磁盘上的前一个值时断电了，你最终得到的是新旧值拼接在一起的值么？
+
+* 如果另一个客户端在写入进行时读取那个文档，它看到的是一个部分更新的值么？
+
+这些问题会令人难以置信地困惑，所以存储引擎几乎普遍提供单节点上的单对象（比如键值对）级别的原子性与隔离性。原子性在针对崩溃恢复时可以用日志实现（见“使B树稳定”一节），而隔离性可以用每个对象的锁来实现（同一时刻只允许一个线程访问对象）。
+
+一些数据库孩提攻了更复杂的原子操作，比如增量操作，它消除了对如图7-1所示的读取-修改-写入循环的需求。类似的流行操作还有比较并设置操作，它使得写入只有在值没有并发地被其它人修改才会发生（见“比较并设置”一节）。
+
+这些单对象操作很有用，因为它们可以防止好几个客户端并发尝试写入同一个对象时丢失更新的数据（见“防止丢失更新的数据”）。然而，它们不是通常意义上的事务。比较并设置以及其它单对象操作由于商业目的已经被称为“轻量级事务”，甚至是“ACID”，但是这些术语都是误导人的。事务通常被理解为一种把在多个对象上的多个操作分组成单个操作单元的机制。
+
+#### 多对象事务的需要
+
+Many distributed datastores have abandoned multi-object transactions because they are difficult to implement across partitions, and they can get in the way in some scenarios where very high availability or performance is required. However, there is nothing that fundamentally prevents transactions in a distributed database, and we will discuss implementations of distributed transactions in Chapter   9. 
+
+But do we need multi-object transactions at all? Would it be possible to implement any application with only a key-value data model and single-object operations? 
+
+There are some use cases in which single-object inserts, updates, and deletes are sufficient. However, in many other cases writes to several different objects need to be coordinated: 
+
+* In a relational data model, a row in one table often has a foreign key reference to a row in another table. (Similarly, in a graph-like data model, a vertex has edges to other vertices.) Multi-object transactions allow you to ensure that these references remain valid: when inserting several records that refer to one another, the foreign keys have to be correct and up to date, or the data becomes nonsensical.
+
+* In a document data model, the fields that need to be updated together are often within the same document, which is treated as a single object — no multi-object transactions are needed when updating a single document. However, document databases lacking join functionality also encourage denormalization (see “Relational Versus Document Databases Today”). When denormalized information needs to be updated, like in the example of Figure   7-2, you need to update several documents in one go. Transactions are very useful in this situation to prevent denormalized data from going out of sync. 
+
+* In databases with secondary indexes (almost everything except pure key-value stores), the indexes also need to be updated every time you change a value. These indexes are different database objects from a transaction point of view: for example, without transaction isolation, it’s possible for a record to appear in one index but not another, because the update to the second index hasn’t happened yet. 
+
+Such applications can still be implemented without transactions. However, error handling becomes much more complicated without atomicity, and the lack of isolation can cause concurrency problems. We will discuss those in “Weak Isolation Levels”, and explore alternative approaches in Chapter   12.
+
+#### 处理错误与中止
+
+A key feature of a transaction is that it can be aborted and safely retried if an error occurred. ACID databases are based on this philosophy: if the database is in danger of violating its guarantee of atomicity, isolation, or durability, it would rather abandon the transaction entirely than allow it to remain half-finished. 
+
+Not all systems follow that philosophy, though. In particular, datastores with leaderless replication (see “Leaderless Replication”) work much more on a “best effort” basis, which could be summarized as “the database will do as much as it can, and if it runs into an error, it won’t undo something it has already done” — so it’s the application’s responsibility to recover from errors. 
+
+Errors will inevitably happen, but many software developers prefer to think only about the happy path rather than the intricacies of error handling. For example, popular object-relational mapping (ORM) frameworks such as Rails’s ActiveRecord and Django don’t retry aborted transactions — the error usually results in an exception bubbling up the stack, so any user input is thrown away and the user gets an error message. This is a shame, because the whole point of aborts is to enable safe retries. 
+
+Although retrying an aborted transaction is a simple and effective error handling mechanism, it isn’t perfect: 
+
+* If the transaction actually succeeded, but the network failed while the server tried to acknowledge the successful commit to the client (so the client thinks it failed), then retrying the transaction causes it to be performed twice — unless you have an additional application-level deduplication mechanism in place. 
+
+* If the error is due to overload, retrying the transaction will make the problem worse, not better. To avoid such feedback cycles, you can limit the number of retries, use exponential backoff, and handle overload-related errors differently from other errors (if possible). 
+
+* It is only worth retrying after transient errors (for example due to deadlock, isolation violation, temporary network interruptions, and failover); after a permanent error (e.g., constraint violation) a retry would be pointless. 
+
+* If the transaction also has side effects outside of the database, those side effects may happen even if the transaction is aborted. For example, if you’re sending an email, you wouldn’t want to send the email again every time you retry the transaction. If you want to make sure that several different systems either commit or abort together, two-phase commit can help (we will discuss this in “Atomic Commit and Two-Phase Commit (2PC)”). 
+
+* If the client process fails while retrying, any data it was trying to write to the database is lost.
