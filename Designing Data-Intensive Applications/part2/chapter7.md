@@ -215,3 +215,67 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 * 如果事务还会导致数据库之外的副作用，即使事务被中止了这些副作用也许已经发生了。举个例子，如果你再发送电子邮件，你不会想要在重试事务时每次重新发送这封电子邮件。如果你想要确定好几个不同的系统要么一起提交或者中止了事务，两段提交可以有所帮助（我们会在“原子提交与两段提交（2PC）”一节中讨论它）。
 
 * 如果客户端进程在重试时崩溃，它尝试写入到数据库的任何数据都会丢失。
+
+## 弱隔离级别
+
+如果两个事务没有访问同一份数据，那么它们是可以安全地并行执行地，因为互相没有依赖。并发问题（竞争条件）只有在一个事务读取另外一个事务正在修改地数据时，或者当两个事务尝试同时修改同一份数据才会出现。
+
+并发bug很难通过测试找到，因为这样的bug只有在时间不对的时候才会触发。这样的时间问题非常少发生，通常很难重现。并发也非常难以推理，尤其是在大型应用中你都不知道还有什么地方的代码也在同时访问数据库。应用开发在一次只有一个用户就已经很困难了；有许多并发用户让它变得更加困难，因为任何一段数据都可能在任何时候意外地发生变化。
+
+由于这个原因，数据库一直试图通过提供*事务隔离性*向应用程序开发者隐藏并发问题。理论上，隔离性可以通过假设没有并发正在发生简化问题：*可串行化*隔离性意味着数据库保证事务有着顺序执行同样的效果（即一次一个，没有任何并发情形）。
+
+实践中，可惜隔离性没有那么简单。可串行化隔离性有性能损耗，而许多数据库不打算付出这样的代价。因此通常系统会使用稍弱的隔离级别，他能防范*某些*并发问题，但不是全部的。这些隔离级别更难理解，并且会导致很微妙的bug，但是事件中它们依然在使用。
+
+由弱事务隔离性导致的并发性bug不只是理论性问题。它们曾经导致了大量资金的损失，财务审计师进行调查，以及客户数据被破坏。关于这些问题启示的一条受欢迎的评论是“处理财务数据时要使用ACID数据库！”——但是这没有意义。甚至许多流行的关系型数据库系统（通常被认为是“ACID”的）使用弱隔离，所以他们不一定会防止这些错误的发生。
+
+与其盲目地依赖工具，我们需要提高对存在的各种并发问题的认识，以及如何防止它们。之后我们才能用手边的工具构建可靠和正确的应用。
+
+在这一节我们会思考好几个实践中用到的弱（非串行化）的隔离级别，并详细讨论那种竞争条件可以或者不会发生，所以你可以决定那种级别是适合你的应用的。一旦完成，我们会详细讨论可串行化（见“可串行化”一节）。我们对隔离级别的讨论是随意的，并使用示例。如果你需要对其属性进行严格的定义和分析，你可以在学术文献中找到它们。
+
+### 提交读
+
+The most basic level of transaction isolation is read committed.v It makes two guarantees: 
+
+1. When reading from the database, you will only see data that has been committed (no dirty reads). 
+
+2. When writing to the database, you will only overwrite data that has been committed (no dirty writes). Let’s discuss these two guarantees in more detail.
+
+#### 没有脏读
+
+Imagine a transaction has written some data to the database, but the transaction has not yet committed or aborted. Can another transaction see that uncommitted data? If yes, that is called a dirty read [2]. 
+
+Transactions running at the read committed isolation level must prevent dirty reads. This means that any writes by a transaction only become visible to others when that transaction commits (and then all of its writes become visible at once). This is illustrated in Figure   7-4, where user 1 has set x = 3, but user 2’ s get x still returns the old value, 2, while user 1 has not yet committed.
+
+*Figure 7-4. No dirty reads: user 2 sees the new value for x only after user 1’ s transaction has committed.*
+
+There are a few reasons why it’s useful to prevent dirty reads: 
+
+* If a transaction needs to update several objects, a dirty read means that another transaction may see some of the updates but not others. For example, in Figure   7-2, the user sees the new unread email but not the updated counter. This is a dirty read of the email. Seeing the database in a partially updated state is confusing to users and may cause other transactions to take incorrect decisions. 
+
+* If a transaction aborts, any writes it has made need to be rolled back (like in Figure   7-3). If the database allows dirty reads, that means a transaction may see data that is later rolled back — i.e., which is never actually committed to the database. Reasoning about the consequences quickly becomes mind-bending.
+
+#### 没有脏写
+
+What happens if two transactions concurrently try to update the same object in a database? We don’t know in which order the writes will happen, but we normally assume that the later write overwrites the earlier write. 
+
+However, what happens if the earlier write is part of a transaction that has not yet committed, so the later write overwrites an uncommitted value? This is called a dirty write [28]. Transactions running at the read committed isolation level must prevent dirty writes, usually by delaying the second write until the first write’s transaction has committed or aborted. 
+
+By preventing dirty writes, this isolation level avoids some kinds of concurrency problems:
+
+* If transactions update multiple objects, dirty writes can lead to a bad outcome. For example, consider Figure   7-5, which illustrates a used car sales website on which two people, Alice and Bob, are simultaneously trying to buy the same car. Buying a car requires two database writes: the listing on the website needs to be updated to reflect the buyer, and the sales invoice needs to be sent to the buyer. In the case of Figure   7-5, the sale is awarded to Bob (because he performs the winning update to the listings table), but the invoice is sent to Alice (because she performs the winning update to the invoices table). Read committed prevents such mishaps. 
+
+* However, read committed does not prevent the race condition between two counter increments in Figure   7-1. In this case, the second write happens after the first transaction has committed, so it’s not a dirty write. It’s still incorrect, but for a different reason — in “Preventing Lost Updates” we will discuss how to make such counter increments safe.
+
+*Figure 7-5. With dirty writes, conflicting writes from different transactions can be mixed up.*
+
+#### 实现提交读
+
+Read committed is a very popular isolation level. It is the default setting in Oracle 11g, PostgreSQL, SQL Server 2012, MemSQL, and many other databases [8]. 
+
+Most commonly, databases prevent dirty writes by using row-level locks: when a transaction wants to modify a particular object (row or document), it must first acquire a lock on that object. It must then hold that lock until the transaction is committed or aborted. Only one transaction can hold the lock for any given object; if another transaction wants to write to the same object, it must wait until the first transaction is committed or aborted before it can acquire the lock and continue. This locking is done automatically by databases in read committed mode (or stronger isolation levels). 
+
+How do we prevent dirty reads? One option would be to use the same lock, and to require any transaction that wants to read an object to briefly acquire the lock and then release it again immediately after reading. This would ensure that a read couldn’t happen while an object has a dirty, uncommitted value (because during that time the lock would be held by the transaction that has made the write). 
+
+However, the approach of requiring read locks does not work well in practice, because one long-running write transaction can force many read-only transactions to wait until the long-running transaction has completed. This harms the response time of read-only transactions and is bad for operability: a slowdown in one part of an application can have a knock-on effect in a completely different part of the application, due to waiting for locks. 
+
+For that reason, most databasesvi prevent dirty reads using the approach illustrated in Figure   7-4: for every object that is written, the database remembers both the old committed value and the new value set by the transaction that currently holds the write lock. While the transaction is ongoing, any other transactions that read the object are simply given the old value. Only when the new value is committed do transactions switch over to reading the new value.
