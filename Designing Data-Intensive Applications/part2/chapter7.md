@@ -182,36 +182,36 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 #### 多对象事务的需要
 
-Many distributed datastores have abandoned multi-object transactions because they are difficult to implement across partitions, and they can get in the way in some scenarios where very high availability or performance is required. However, there is nothing that fundamentally prevents transactions in a distributed database, and we will discuss implementations of distributed transactions in Chapter   9. 
+许多分布式数据存储放弃了多对象事务，因为在多分区上实现很困难，而且在某些需要非常高的可用性和性能的场景中会很碍事。然而，本质上没有任何东西阻拦分布式数据库使用事务，我们会在第九章讨论分布式事务的实现。
 
-But do we need multi-object transactions at all? Would it be possible to implement any application with only a key-value data model and single-object operations? 
+但是我们到底需不需要多对象事务呢？只用键值对数据模型和单对象操作是不是就可以实现任意的应用程序呢？
 
-There are some use cases in which single-object inserts, updates, and deletes are sufficient. However, in many other cases writes to several different objects need to be coordinated: 
+某些使用场景中单对象插入、更新、删除就足够了。然而在许多其他场景中我们需要协调对好几个不同对象的写入操作：
 
-* In a relational data model, a row in one table often has a foreign key reference to a row in another table. (Similarly, in a graph-like data model, a vertex has edges to other vertices.) Multi-object transactions allow you to ensure that these references remain valid: when inserting several records that refer to one another, the foreign keys have to be correct and up to date, or the data becomes nonsensical.
+* 在关系型数据模型中，一张表中的一行经常有一个指向其它表中一行的外键。（类似的在图数据模型中，一个顶点有到其它顶点的边。）多对象事务允许你保证这些引用保持有效：当插入几条互相指向的记录，那外键必须正确而且保持更新，否则数据就没有意义了。
 
-* In a document data model, the fields that need to be updated together are often within the same document, which is treated as a single object — no multi-object transactions are needed when updating a single document. However, document databases lacking join functionality also encourage denormalization (see “Relational Versus Document Databases Today”). When denormalized information needs to be updated, like in the example of Figure   7-2, you need to update several documents in one go. Transactions are very useful in this situation to prevent denormalized data from going out of sync. 
+* 在文档型数据模型中，需要被一起更新的字段经常是在同一个文档里的，它们被视为单个对象——在更新单个文档是不需要多对象事务。然而，文档型数据库没有连接功能，也鼓励反规范化（见“今天关系型 vs 文档型数据库”一节）。当反规范化的信息需要更新时，比如图7-2中的例子，你需要一次更新好几个文档。事务在这种场景下非常有用，防止非规范化的数据不同步。
 
-* In databases with secondary indexes (almost everything except pure key-value stores), the indexes also need to be updated every time you change a value. These indexes are different database objects from a transaction point of view: for example, without transaction isolation, it’s possible for a record to appear in one index but not another, because the update to the second index hasn’t happened yet. 
+* 在有二级索引的数据库（几乎所有数据库都有，除了纯键值对存储）中，每当你更新一个值时索引也需要更新。从事务的角度上看这些索引是不同的数据库对象：举个例子，没有事务隔离性，一条记录出现在一个索引中但是不在另外一个索引中是可能的，因为对第二个索引的更新还没有发生。
 
-Such applications can still be implemented without transactions. However, error handling becomes much more complicated without atomicity, and the lack of isolation can cause concurrency problems. We will discuss those in “Weak Isolation Levels”, and explore alternative approaches in Chapter   12.
+这样的应用程序仍然可以不用事务实现。然而没有原子性的话错误处理变得非常复杂，没有隔离性则会导致并发问题。我们会在“弱隔离级别”一节讨论这些问题，并在第十二章探索其它替代方案。
 
 #### 处理错误与中止
 
-A key feature of a transaction is that it can be aborted and safely retried if an error occurred. ACID databases are based on this philosophy: if the database is in danger of violating its guarantee of atomicity, isolation, or durability, it would rather abandon the transaction entirely than allow it to remain half-finished. 
+事务的一个核心功能是当错误发生时他可以被终止然后安全地重试。符合ACID地数据库是基于这样的哲学地：如果数据库面临原子性、隔离性或者持久性被破坏的危险，它宁愿放弃整个事务也不会允许它部分执行。
 
-Not all systems follow that philosophy, though. In particular, datastores with leaderless replication (see “Leaderless Replication”) work much more on a “best effort” basis, which could be summarized as “the database will do as much as it can, and if it runs into an error, it won’t undo something it has already done” — so it’s the application’s responsibility to recover from errors. 
+然而并不是所有的系统都遵从这个哲学。特别是，无领机复制的数据库（见“无领机复制”一节）更多的是基于“尽最大努力”信条，它可以被总结为“数据库会尽可能地执行语句，当遇到问题时，他不会撤销它已经完成了的结果”——所以从错误中恢复编程了应用程序的责任。
 
-Errors will inevitably happen, but many software developers prefer to think only about the happy path rather than the intricacies of error handling. For example, popular object-relational mapping (ORM) frameworks such as Rails’s ActiveRecord and Django don’t retry aborted transactions — the error usually results in an exception bubbling up the stack, so any user input is thrown away and the user gets an error message. This is a shame, because the whole point of aborts is to enable safe retries. 
+错误的发生难以避免，但是许多软件开发者更倾向于只考虑不出错的路径而不是复杂的错误处理。举个例子，非常流行的对象关系映射（ORM）框架，比如Rail的ActiveRecord以及Django，不会重试中止了的事务——错误通常引发堆栈异常，所以任何用户输入都被丢弃而用户获得一条错误信息。这很可惜，因为中止的全部意义就是为了可以安全的重试。
 
-Although retrying an aborted transaction is a simple and effective error handling mechanism, it isn’t perfect: 
+虽然重试中止了的事务是一个既简单又有效的错误处理机制，但是它并不完美：
 
-* If the transaction actually succeeded, but the network failed while the server tried to acknowledge the successful commit to the client (so the client thinks it failed), then retrying the transaction causes it to be performed twice — unless you have an additional application-level deduplication mechanism in place. 
+* 如果事务实际成功了，但是服务器试图向服务器确认提交成功时网络瘫痪了（于是客户端认为它失败了），那么再次事务重试会导致它被执行两次——除非你已经有了另外一个应用级别的去重机制。
 
-* If the error is due to overload, retrying the transaction will make the problem worse, not better. To avoid such feedback cycles, you can limit the number of retries, use exponential backoff, and handle overload-related errors differently from other errors (if possible). 
+* 如果错误是因为负载过高，重试事务会导致问题更加严重，而不会更好。为了避免这种反馈循环，你可以限制重试的次数，使用指数回退，并且（可能的话）把负载过高相关错误的处理机制与其它的区别开来。
 
-* It is only worth retrying after transient errors (for example due to deadlock, isolation violation, temporary network interruptions, and failover); after a permanent error (e.g., constraint violation) a retry would be pointless. 
+* 只有在发生了瞬态错误（比如说死锁、违反了隔离性、临时网络中断以及故障迁移）之后才值得重试；而发生了永久错误（比如违反了约束）之后重试是没有意义的。
 
-* If the transaction also has side effects outside of the database, those side effects may happen even if the transaction is aborted. For example, if you’re sending an email, you wouldn’t want to send the email again every time you retry the transaction. If you want to make sure that several different systems either commit or abort together, two-phase commit can help (we will discuss this in “Atomic Commit and Two-Phase Commit (2PC)”). 
+* 如果事务还会导致数据库之外的副作用，即使事务被中止了这些副作用也许已经发生了。举个例子，如果你再发送电子邮件，你不会想要在重试事务时每次重新发送这封电子邮件。如果你想要确定好几个不同的系统要么一起提交或者中止了事务，两段提交可以有所帮助（我们会在“原子提交与两段提交（2PC）”一节中讨论它）。
 
-* If the client process fails while retrying, any data it was trying to write to the database is lost.
+* 如果客户端进程在重试时崩溃，它尝试写入到数据库的任何数据都会丢失。
