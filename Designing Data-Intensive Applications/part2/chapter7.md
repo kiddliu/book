@@ -280,35 +280,35 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 由于这个原因，许多数据库防止脏读使用了图7-4中展示的方法：对于每个被写入的对象，数据库同时记住旧值与当前占据写入锁的事务设置的新值。当事务进行的时候，任何其它读取对象的事务获得旧的值。只有在新的值被提交了以后所有事务才会切换到读取新的值。
 
-### Snapshot Isolation and Repeatable Read
+### 快照隔离与可重复读
 
-If you look superficially at read committed isolation, you could be forgiven for thinking that it does everything that a transaction needs to do: it allows aborts (required for atomicity), it prevents reading the incomplete results of transactions, and it prevents concurrent writes from getting intermingled. Indeed, those are useful features, and much stronger guarantees than you can get from a system that has no transactions. 
+如果只看提交读隔离的表面，认为它已经做了事务需要的所有事情，可以原谅：它允许中止（原子性需要），它避免了读取事务不完整的结果，也防止并发写入混在一起。确实，这些都是有用的功能，同时相比于那些不提供事务的系统提供的保证要强多了。
 
-However, there are still plenty of ways in which you can have concurrency bugs when using this isolation level. For example, Figure   7-6 illustrates a problem that can occur with read committed.
+然而，使用这种隔离级别还是有许多种方式遇到并发bug的。举个例子，图7-6展示了使用提交读会发生的问题。
 
-*Figure 7-6. Read skew: Alice observes the database in an inconsistent state.*
+*图7-6 阅读扭曲：Alice观察到数据库处于不一致的状态。*
 
-Say Alice has $ 1,000 of savings at a bank, split across two accounts with $ 500 each. Now a transaction transfers $ 100 from one of her accounts to the other. If she is unlucky enough to look at her list of account balances in the same moment as that transaction is being processed, she may see one account balance at a time before the incoming payment has arrived (with a balance of $ 500), and the other account after the outgoing transfer has been made (the new balance being $ 400). To Alice it now appears as though she only has a total of $ 900 in her accounts — it seems that $ 100 has vanished into thin air. 
+假设Alice在银行存了1000块，拆分到两个账户，每个账户500块。现在一个事务分别从其中一个账户转100块到另外一个账户。如果事务被处理的同时她不幸看到了账户余额列表，她会看到一个账户余额处于收款到达之前的状态（余额500块），另一个账户处于付款之后的状态（新余额400块）。对于Alice来说现在看起来她的账户加起来只有900块了——好像那100块凭空消失了。
 
-This anomaly is called a nonrepeatable read or read skew: if Alice were to read the balance of account 1 again at the end of the transaction, she would see a different value ($ 600) than she saw in her previous query. Read skew is considered acceptable under read committed isolation: the account balances that Alice saw were indeed committed at the time when she read them.
+这个异常现象叫做不可重复读或者读偏：如果Alice在事务结束再一次读取账户1的余额，他会看到另一个值（600块）而不是前一次查询到的值。读偏在提交读隔离中被认为是可接受的：Alice看到的账户余额在她读取的时候确实是提交过了的。
 
-> Note
+> 注意
 >
-> The term skew is unfortunately overloaded: we previously used it in the sense of an unbalanced workload with hot spots (see “Skewed Workloads and Relieving Hot Spots”), whereas here it means timing anomaly.
+> 术语*偏*不幸地被赋予了新的含义：之前我们把它用在了热点的不平衡负载方面，而在这里它指的是时间上的异常现象。
 
-In Alice’s case, this is not a lasting problem, because she will most likely see consistent account balances if she reloads the online banking website a few seconds later. However, some situations cannot tolerate such temporary inconsistency:
+在Alice的场景中，这不是一个持久的问题，因为她一定会在几秒钟后重新加载在线银行网站看到一致的账户余额。然而，一些场景无法忍受这种临时的不一致性：
 
-Backups
+*备份*
 
-Taking a backup requires making a copy of the entire database, which may take hours on a large database. During the time that the backup process is running, writes will continue to be made to the database. Thus, you could end up with some parts of the backup containing an older version of the data, and other parts containing a newer version. If you need to restore from such a backup, the inconsistencies (such as disappearing money) become permanent.
+做备份需要制作整个数据库的拷贝，在大型数据库上会花几个小时的时间。在备份过程中，写入请求会继续发送到数据库。这样，最终备份的某部分包含的是旧版本的数据，而其它部分包含的是新版本的。如果你需要从这样的备份恢复，不一致性（比如消失了的钱）就变成了永久的。
 
-Analytic queries and integrity checks
+*分析性查询与完整性检查*
 
-Sometimes, you may want to run a query that scans over large parts of the database. Such queries are common in analytics (see “Transaction Processing or Analytics?”), or may be part of a periodic integrity check that everything is in order (monitoring for data corruption). These queries are likely to return nonsensical results if they observe parts of the database at different points in time.
+有时，你会想要执行一个扫描大部分数据库的查询操作。这样的查询操作在分析时很常见（见“事务处理还是分析？”一节），亦或者是周期性的完整性检查一切是否正常（检测数据损坏）的一部分。如果这些查询在不同的时间点观察数据库的某些部分，就很可能会返回没有意义的结果。
 
-Snapshot isolation [28] is the most common solution to this problem. The idea is that each transaction reads from a consistent snapshot of the database — that is, the transaction sees all the data that was committed in the database at the start of the transaction. Even if the data is subsequently changed by another transaction, each transaction sees only the old data from that particular point in time. 
+*快照隔离*是这个问题最常见的解决方案。它的理念是每个事务读自数据库的一致快照——也就是，事务看到所有事务开始时被提交到数据库的所有数据。即使数据之后被另一个事务修改了，从那个特定时间点起，每个事务只看到旧数据。
 
-Snapshot isolation is a boon for long-running, read-only queries such as backups and analytics. It is very hard to reason about the meaning of a query if the data on which it operates is changing at the same time as the query is executing. When a transaction can see a consistent snapshot of the database, frozen at a particular point in time, it is much easier to understand. Snapshot isolation is a popular feature: it is supported by PostgreSQL, MySQL with the InnoDB storage engine, Oracle, SQL Server, and others [23, 31, 32].
+对于诸如备份和分析这种长时间运行的只读查询来说，快照隔离是一个好事情。如果查询执行过程中数据也在同时变化，那么推理查询的意义就很难了。当事务可以看到数据库的一致快照。冻结在某个特定时间点，就很容易理解了。快照隔离是个受欢迎的功能：PostgreSQL、使用InnoDB存储引擎的MySQL、Oracle、SQL Server以及其它数据库都支持。
 
 #### Implementing snapshot isolation
 
