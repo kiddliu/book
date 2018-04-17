@@ -234,48 +234,132 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 ### 提交读
 
-The most basic level of transaction isolation is read committed.v It makes two guarantees: 
+事务隔离性最基本的级别时提交读。它做出了两项保证：
 
-1. When reading from the database, you will only see data that has been committed (no dirty reads). 
+1. 从数据库读取时，你只会看到已经被提交了的数据（没有脏读）。
 
-2. When writing to the database, you will only overwrite data that has been committed (no dirty writes). Let’s discuss these two guarantees in more detail.
+2. 当写入到数据库时，你只会覆盖已经被提交了的数据（没有脏写）。接下来让我们详细讨论这两项保证吧。
 
 #### 没有脏读
 
-Imagine a transaction has written some data to the database, but the transaction has not yet committed or aborted. Can another transaction see that uncommitted data? If yes, that is called a dirty read [2]. 
+设想一个事务写入了某些数据到数据库，但是事务还没有提交或是中止。另外一个事务可以看到那些未提交的数据吗？如果是，那就叫做脏读。
 
-Transactions running at the read committed isolation level must prevent dirty reads. This means that any writes by a transaction only become visible to others when that transaction commits (and then all of its writes become visible at once). This is illustrated in Figure   7-4, where user 1 has set x = 3, but user 2’ s get x still returns the old value, 2, while user 1 has not yet committed.
+运行在提交读隔离级别的事务必须防止脏读的发生。这意味着事务的任何写入只有在提交之后才对其它事务可见（之后它的所有写入立刻变得可见了）。这如图7-4所示，其中用户1设*x* = 3，但是用户2*获取x*任然得到的是旧值，2，因为用户1还没有提交。
 
-*Figure 7-4. No dirty reads: user 2 sees the new value for x only after user 1’ s transaction has committed.*
+*图7-4 没有脏读：用户2只有在用户1的事务提交之后才能看到x的新值。*
 
-There are a few reasons why it’s useful to prevent dirty reads: 
+为什么防止脏读很有用，这里有几个理由：
 
-* If a transaction needs to update several objects, a dirty read means that another transaction may see some of the updates but not others. For example, in Figure   7-2, the user sees the new unread email but not the updated counter. This is a dirty read of the email. Seeing the database in a partially updated state is confusing to users and may cause other transactions to take incorrect decisions. 
+* 如果事务需要更新好几个对象，脏读意味着另外一个事务会看到部分更新而其它的看不到。举个例子，在图7-2中，用户看到新的未读邮件但是没有看到更新了的计数器。这是邮件的脏读。看到数据库处在部分更新的状态对用户来说很困惑，也会导致其它事务做出错误的决定。
 
-* If a transaction aborts, any writes it has made need to be rolled back (like in Figure   7-3). If the database allows dirty reads, that means a transaction may see data that is later rolled back — i.e., which is never actually committed to the database. Reasoning about the consequences quickly becomes mind-bending.
+* 如果事务中止，任何它已经完成了的写入都需要回滚（如图7-3中那样）。如果数据库允许脏读，那意味着事务会看到之后被混滚了的数据——也就是那些从来没有被实际提交到数据库中的数据。关于后果的推理很快会变得让人费解。
 
 #### 没有脏写
 
-What happens if two transactions concurrently try to update the same object in a database? We don’t know in which order the writes will happen, but we normally assume that the later write overwrites the earlier write. 
+如果两个事务并发地尝试更新数据库中同一个对象时会发生什么？我们不知道写入的发生顺序，但是一般我们假设稍后的写入会覆盖稍早的写入。
 
-However, what happens if the earlier write is part of a transaction that has not yet committed, so the later write overwrites an uncommitted value? This is called a dirty write [28]. Transactions running at the read committed isolation level must prevent dirty writes, usually by delaying the second write until the first write’s transaction has committed or aborted. 
+然而，如果稍早的写入是还没有提交的事务的一部分，那么稍后的写入会覆盖未提交的数据么？这被称为脏写。运行在提交读隔离级别的事务必须防止脏写的发生，通常是通过延迟第二个写入直到第一个写入的事务提交或是中止完成的。
 
-By preventing dirty writes, this isolation level avoids some kinds of concurrency problems:
+通过防止脏写，这个隔离级别避免了一些类型的并发问题：
 
-* If transactions update multiple objects, dirty writes can lead to a bad outcome. For example, consider Figure   7-5, which illustrates a used car sales website on which two people, Alice and Bob, are simultaneously trying to buy the same car. Buying a car requires two database writes: the listing on the website needs to be updated to reflect the buyer, and the sales invoice needs to be sent to the buyer. In the case of Figure   7-5, the sale is awarded to Bob (because he performs the winning update to the listings table), but the invoice is sent to Alice (because she performs the winning update to the invoices table). Read committed prevents such mishaps. 
+* 如果事务更新数个对象，脏写回导致恶劣的后果。举个例子，考虑一下图7-5，它展示一个二手车销售网站，其中两个人Alice和Bob，同时尝试购买同一部车。买一部车需要两次数据库写入：网站列表需要被更新来体现买家，而销售发票需要发送给买家。在图7-5的场景中，销售结果授予了Bob（因为她对销售列表所在的表进行了最终写入），但是发票却寄给了Alice（因为她对发票所在的表进行了最终写入）。提交读防止了这样的事故。
 
-* However, read committed does not prevent the race condition between two counter increments in Figure   7-1. In this case, the second write happens after the first transaction has committed, so it’s not a dirty write. It’s still incorrect, but for a different reason — in “Preventing Lost Updates” we will discuss how to make such counter increments safe.
+* 然而，提交读不不能防止图7-1中的两个计数器增加一的竞争条件。在这种情况下，第二次写如发生在第一个事务提交之后，所以这不是脏写。但是它仍然不对，却是由于另外一个原因——在“防止丢失的更新”我们回讨论如何使这样的计数器加一是安全的。
 
-*Figure 7-5. With dirty writes, conflicting writes from different transactions can be mixed up.*
+*图7-5 有脏写的话，来自不同事务的冲突写入会混在一起。*
 
 #### 实现提交读
 
-Read committed is a very popular isolation level. It is the default setting in Oracle 11g, PostgreSQL, SQL Server 2012, MemSQL, and many other databases [8]. 
+提交读是非常受欢迎的隔离级别。在Oracle 11g、PostgreSQL、SQL Server 2012、MemSQL以及许多其它数据库中都是默认设置。
 
-Most commonly, databases prevent dirty writes by using row-level locks: when a transaction wants to modify a particular object (row or document), it must first acquire a lock on that object. It must then hold that lock until the transaction is committed or aborted. Only one transaction can hold the lock for any given object; if another transaction wants to write to the same object, it must wait until the first transaction is committed or aborted before it can acquire the lock and continue. This locking is done automatically by databases in read committed mode (or stronger isolation levels). 
+最常见的是，为了防止脏写数据库使用了行级别的锁：当事务要修改特定对象（行或是文档）时，它必须首先获取对象的锁。然后它必须占有那个锁直至事务被提交或是被中止。只有一个事务可以占有属于任何给定对象的锁；如果另一个事务想要写入同一个对象，它首先必须等待直到第一个事务提交或者中止，然后它才能获取锁并继续执行。在提交读模式（或是更强的隔离级别）这种锁动作是由数据库自动完成的。
 
-How do we prevent dirty reads? One option would be to use the same lock, and to require any transaction that wants to read an object to briefly acquire the lock and then release it again immediately after reading. This would ensure that a read couldn’t happen while an object has a dirty, uncommitted value (because during that time the lock would be held by the transaction that has made the write). 
+我们如何防止脏读呢？一种选择是使用同样的锁，并且要求任何要读取对象的事务简短地获取锁然后在读取之后再次释放它。这保证了读取无法在对象有修改后未提交的值时发生（因为在那个时候锁正在被发起写入的事务占有）。
 
-However, the approach of requiring read locks does not work well in practice, because one long-running write transaction can force many read-only transactions to wait until the long-running transaction has completed. This harms the response time of read-only transactions and is bad for operability: a slowdown in one part of an application can have a knock-on effect in a completely different part of the application, due to waiting for locks. 
+然而，实践中获取读的锁的方式工作得并不是很好，因为一次长时间写入得事务可以强制许多只读的事务等待它完成。这会危及只读事务的相应时间，对于运营来说是很恶劣的：程序一个部分的缓慢对完全不同的另一部分有连锁反应，只是因为在等待锁。
 
-For that reason, most databasesvi prevent dirty reads using the approach illustrated in Figure   7-4: for every object that is written, the database remembers both the old committed value and the new value set by the transaction that currently holds the write lock. While the transaction is ongoing, any other transactions that read the object are simply given the old value. Only when the new value is committed do transactions switch over to reading the new value.
+由于这个原因，许多数据库防止脏读使用了图7-4中展示的方法：对于每个被写入的对象，数据库同时记住旧值与当前占据写入锁的事务设置的新值。当事务进行的时候，任何其它读取对象的事务获得旧的值。只有在新的值被提交了以后所有事务才会切换到读取新的值。
+
+### Snapshot Isolation and Repeatable Read
+
+If you look superficially at read committed isolation, you could be forgiven for thinking that it does everything that a transaction needs to do: it allows aborts (required for atomicity), it prevents reading the incomplete results of transactions, and it prevents concurrent writes from getting intermingled. Indeed, those are useful features, and much stronger guarantees than you can get from a system that has no transactions. 
+
+However, there are still plenty of ways in which you can have concurrency bugs when using this isolation level. For example, Figure   7-6 illustrates a problem that can occur with read committed.
+
+*Figure 7-6. Read skew: Alice observes the database in an inconsistent state.*
+
+Say Alice has $ 1,000 of savings at a bank, split across two accounts with $ 500 each. Now a transaction transfers $ 100 from one of her accounts to the other. If she is unlucky enough to look at her list of account balances in the same moment as that transaction is being processed, she may see one account balance at a time before the incoming payment has arrived (with a balance of $ 500), and the other account after the outgoing transfer has been made (the new balance being $ 400). To Alice it now appears as though she only has a total of $ 900 in her accounts — it seems that $ 100 has vanished into thin air. 
+
+This anomaly is called a nonrepeatable read or read skew: if Alice were to read the balance of account 1 again at the end of the transaction, she would see a different value ($ 600) than she saw in her previous query. Read skew is considered acceptable under read committed isolation: the account balances that Alice saw were indeed committed at the time when she read them.
+
+> Note
+>
+> The term skew is unfortunately overloaded: we previously used it in the sense of an unbalanced workload with hot spots (see “Skewed Workloads and Relieving Hot Spots”), whereas here it means timing anomaly.
+
+In Alice’s case, this is not a lasting problem, because she will most likely see consistent account balances if she reloads the online banking website a few seconds later. However, some situations cannot tolerate such temporary inconsistency:
+
+Backups
+
+Taking a backup requires making a copy of the entire database, which may take hours on a large database. During the time that the backup process is running, writes will continue to be made to the database. Thus, you could end up with some parts of the backup containing an older version of the data, and other parts containing a newer version. If you need to restore from such a backup, the inconsistencies (such as disappearing money) become permanent.
+
+Analytic queries and integrity checks
+
+Sometimes, you may want to run a query that scans over large parts of the database. Such queries are common in analytics (see “Transaction Processing or Analytics?”), or may be part of a periodic integrity check that everything is in order (monitoring for data corruption). These queries are likely to return nonsensical results if they observe parts of the database at different points in time.
+
+Snapshot isolation [28] is the most common solution to this problem. The idea is that each transaction reads from a consistent snapshot of the database — that is, the transaction sees all the data that was committed in the database at the start of the transaction. Even if the data is subsequently changed by another transaction, each transaction sees only the old data from that particular point in time. 
+
+Snapshot isolation is a boon for long-running, read-only queries such as backups and analytics. It is very hard to reason about the meaning of a query if the data on which it operates is changing at the same time as the query is executing. When a transaction can see a consistent snapshot of the database, frozen at a particular point in time, it is much easier to understand. Snapshot isolation is a popular feature: it is supported by PostgreSQL, MySQL with the InnoDB storage engine, Oracle, SQL Server, and others [23, 31, 32].
+
+#### Implementing snapshot isolation
+
+Like read committed isolation, implementations of snapshot isolation typically use write locks to prevent dirty writes (see “Implementing read committed”), which means that a transaction that makes a write can block the progress of another transaction that writes to the same object. However, reads do not require any locks. From a performance point of view, a key principle of snapshot isolation is readers never block writers, and writers never block readers. This allows a database to handle long-running read queries on a consistent snapshot at the same time as processing writes normally, without any lock contention between the two. 
+
+To implement snapshot isolation, databases use a generalization of the mechanism we saw for preventing dirty reads in Figure   7-4. The database must potentially keep several different committed versions of an object, because various in-progress transactions may need to see the state of the database at different points in time. Because it maintains several versions of an object side by side, this technique is known as multi-version concurrency control (MVCC). 
+
+If a database only needed to provide read committed isolation, but not snapshot isolation, it would be sufficient to keep two versions of an object: the committed version and the overwritten-but-not-yet-committed version. However, storage engines that support snapshot isolation typically use MVCC for their read committed isolation level as well. A typical approach is that read committed uses a separate snapshot for each query, while snapshot isolation uses the same snapshot for an entire transaction. 
+
+Figure   7-7 illustrates how MVCC-based snapshot isolation is implemented in PostgreSQL [31] (other implementations are similar). When a transaction is started, it is given a unique, always-increasingvii transaction ID (txid). Whenever a transaction writes anything to the database, the data it writes is tagged with the transaction ID of the writer.
+
+*Figure 7-7. Implementing snapshot isolation using multi-version objects.*
+
+Each row in a table has a created_by field, containing the ID of the transaction that inserted this row into the table. Moreover, each row has a deleted_by field, which is initially empty. If a transaction deletes a row, the row isn’t actually deleted from the database, but it is marked for deletion by setting the deleted_by field to the ID of the transaction that requested the deletion. At some later time, when it is certain that no transaction can any longer access the deleted data, a garbage collection process in the database removes any rows marked for deletion and frees their space. 
+
+An update is internally translated into a delete and a create. For example, in Figure   7-7, transaction 13 deducts $ 100 from account 2, changing the balance from $ 500 to $ 400. The accounts table now actually contains two rows for account 2: a row with a balance of $ 500 which was marked as deleted by transaction 13, and a row with a balance of $ 400 which was created by transaction 13.
+
+#### Visibility rules for observing a consistent snapshot
+
+When a transaction reads from the database, transaction IDs are used to decide which objects it can see and which are invisible. By carefully defining visibility rules, the database can present a consistent snapshot of the database to the application. This works as follows: 
+
+1. At the start of each transaction, the database makes a list of all the other transactions that are in progress (not yet committed or aborted) at that time. Any writes that those transactions have made are ignored, even if the transactions subsequently commit. 
+
+2. Any writes made by aborted transactions are ignored. 
+
+3. Any writes made by transactions with a later transaction ID (i.e., which started after the current transaction started) are ignored, regardless of whether those transactions have committed. 
+
+4. All other writes are visible to the application’s queries. 
+
+These rules apply to both creation and deletion of objects. In Figure   7-7, when transaction 12 reads from account 2, it sees a balance of $ 500 because the deletion of the $ 500 balance was made by transaction 13 (according to rule 3, transaction 12 cannot see a deletion made by transaction 13), and the creation of the $ 400 balance is not yet visible (by the same rule). Put another way, an object is visible if both of the following conditions are true: 
+
+* At the time when the reader’s transaction started, the transaction that created the object had already committed. 
+
+* The object is not marked for deletion, or if it is, the transaction that requested deletion had not yet committed at the time when the reader’s transaction started. 
+
+A long-running transaction may continue using a snapshot for a long time, continuing to read values that (from other transactions’ point of view) have long been overwritten or deleted. By never updating values in place but instead creating a new version every time a value is changed, the database can provide a consistent snapshot while incurring only a small overhead.
+
+#### Indexes and snapshot isolation
+
+How do indexes work in a multi-version database? One option is to have the index simply point to all versions of an object and require an index query to filter out any object versions that are not visible to the current transaction. When garbage collection removes old object versions that are no longer visible to any transaction, the corresponding index entries can also be removed. 
+
+In practice, many implementation details determine the performance of multi-version concurrency control. For example, PostgreSQL has optimizations for avoiding index updates if different versions of the same object can fit on the same page [31]. Another approach is used in CouchDB, Datomic, and LMDB. Although they also use B-trees (see “B-Trees”), they use an append-only/ copy-on-write variant that does not overwrite pages of the tree when they are updated, but instead creates a new copy of each modified page. Parent pages, up to the root of the tree, are copied and updated to point to the new versions of their child pages. Any pages that are not affected by a write do not need to be copied, and remain immutable [33, 34, 35]. 
+
+With append-only B-trees, every write transaction (or batch of transactions) creates a new B-tree root, and a particular root is a consistent snapshot of the database at the point in time when it was created. There is no need to filter out objects based on transaction IDs because subsequent writes cannot modify an existing B-tree; they can only create new tree roots. However, this approach also requires a background process for compaction and garbage collection.
+
+#### Repeatable read and naming confusion
+
+Snapshot isolation is a useful isolation level, especially for read-only transactions. However, many databases that implement it call it by different names. In Oracle it is called serializable, and in PostgreSQL and MySQL it is called repeatable read [23]. 
+
+The reason for this naming confusion is that the SQL standard doesn’t have the concept of snapshot isolation, because the standard is based on System R’s 1975 definition of isolation levels [2] and snapshot isolation hadn’t yet been invented then. Instead, it defines repeatable read, which looks superficially similar to snapshot isolation. PostgreSQL and MySQL call their snapshot isolation level repeatable read because it meets the requirements of the standard, and so they can claim standards compliance. 
+
+Unfortunately, the SQL standard’s definition of isolation levels is flawed — it is ambiguous, imprecise, and not as implementation-independent as a standard should be [28]. Even though several databases implement repeatable read, there are big differences in the guarantees they actually provide, despite being ostensibly standardized [23]. There has been a formal definition of repeatable read in the research literature [29, 30], but most implementations don’t satisfy that formal definition. And to top it off, IBM DB2 uses “repeatable read” to refer to serializability [8]. 
+
+As a result, nobody really knows what repeatable read means.
