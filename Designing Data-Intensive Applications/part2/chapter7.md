@@ -306,53 +306,53 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 有时，你会想要执行一个扫描大部分数据库的查询操作。这样的查询操作在分析时很常见（见“事务处理还是分析？”一节），亦或者是周期性的完整性检查一切是否正常（检测数据损坏）的一部分。如果这些查询在不同的时间点观察数据库的某些部分，就很可能会返回没有意义的结果。
 
-*快照隔离*是这个问题最常见的解决方案。它的理念是每个事务读自数据库的一致快照——也就是，事务看到所有事务开始时被提交到数据库的所有数据。即使数据之后被另一个事务修改了，从那个特定时间点起，每个事务只看到旧数据。
+*快照隔离*是这个问题最常见的解决方案。它的理念是每个事务读自数据库的一致性快照——也就是，事务看到所有事务开始时被提交到数据库的所有数据。即使数据之后被另一个事务修改了，从那个特定时间点起，每个事务只看到旧数据。
 
-对于诸如备份和分析这种长时间运行的只读查询来说，快照隔离是一个好事情。如果查询执行过程中数据也在同时变化，那么推理查询的意义就很难了。当事务可以看到数据库的一致快照。冻结在某个特定时间点，就很容易理解了。快照隔离是个受欢迎的功能：PostgreSQL、使用InnoDB存储引擎的MySQL、Oracle、SQL Server以及其它数据库都支持。
+对于诸如备份和分析这种长时间运行的只读查询来说，快照隔离是一个好事情。如果查询执行过程中数据也在同时变化，那么推理查询的意义就很难了。当事务可以看到数据库的一致性快照。冻结在某个特定时间点，就很容易理解了。快照隔离是个受欢迎的功能：PostgreSQL、使用InnoDB存储引擎的MySQL、Oracle、SQL Server以及其它数据库都支持。
 
-#### Implementing snapshot isolation
+#### 实现快照隔离
 
-Like read committed isolation, implementations of snapshot isolation typically use write locks to prevent dirty writes (see “Implementing read committed”), which means that a transaction that makes a write can block the progress of another transaction that writes to the same object. However, reads do not require any locks. From a performance point of view, a key principle of snapshot isolation is readers never block writers, and writers never block readers. This allows a database to handle long-running read queries on a consistent snapshot at the same time as processing writes normally, without any lock contention between the two. 
+与提交读隔离类似，快照隔离的实现通常使用写入锁来防止脏写（见“实现提交读”一节），这意味着发起写入的事务可以阻塞其它写入同一个对象的事务进展。然而，读不需要任何锁。从性能的角度看，快照隔离的核心原则是*读者从来不阻塞写者，写者也从来不阻塞读者*。这使得数据库在处理长时间运行在一致性快照上的读取查询的同时也可以按往常一样处理写入请求，而两者之间不会争夺锁。
 
-To implement snapshot isolation, databases use a generalization of the mechanism we saw for preventing dirty reads in Figure   7-4. The database must potentially keep several different committed versions of an object, because various in-progress transactions may need to see the state of the database at different points in time. Because it maintains several versions of an object side by side, this technique is known as multi-version concurrency control (MVCC). 
+要实现快照隔离，数据库使用了图7-4中我们看到的防止脏读的概括机制。数据库必须能保存对象几份不同的提交版本，因为众多正在进行的事务需要看到不同时间点的数据库状态。因为它同时维护了对象的几个版本，这种技巧叫做*多版本并发控制*（MVCC）。
 
-If a database only needed to provide read committed isolation, but not snapshot isolation, it would be sufficient to keep two versions of an object: the committed version and the overwritten-but-not-yet-committed version. However, storage engines that support snapshot isolation typically use MVCC for their read committed isolation level as well. A typical approach is that read committed uses a separate snapshot for each query, while snapshot isolation uses the same snapshot for an entire transaction. 
+如果数据库只需要提供提交读隔离，而不是快照隔离，那么保存两个版本的对象就足够了：提交了的版本与覆盖了但还没有提交的版本。然而支持快照隔离的存储引擎通常也为提交读隔离等级使用MVCC。一种典型的做法是提交读为每个查询请求使用单独的快照，而快照隔离为整个事务使用同一个快照。
 
-Figure   7-7 illustrates how MVCC-based snapshot isolation is implemented in PostgreSQL [31] (other implementations are similar). When a transaction is started, it is given a unique, always-increasingvii transaction ID (txid). Whenever a transaction writes anything to the database, the data it writes is tagged with the transaction ID of the writer.
+图7-7展示了在PostgreSQL中基于MVCC的快照隔离是如何实现的（其它的实现也是类似的）。当事务开始之后，被分配了唯一的、编号持续上升的事务ID（`txid`）。每当事务写入任何东西到数据库的时候，它写入的数据会标记上写者的事务ID。
 
-*Figure 7-7. Implementing snapshot isolation using multi-version objects.*
+*图7-7 用多版本对象实现快照隔离。*
 
-Each row in a table has a created_by field, containing the ID of the transaction that inserted this row into the table. Moreover, each row has a deleted_by field, which is initially empty. If a transaction deletes a row, the row isn’t actually deleted from the database, but it is marked for deletion by setting the deleted_by field to the ID of the transaction that requested the deletion. At some later time, when it is certain that no transaction can any longer access the deleted data, a garbage collection process in the database removes any rows marked for deletion and frees their space. 
+表中的每一行都有`created_by`字段，包含了插入这行到表里的事务ID。此外，每一行也有一个`deleted_by`字段，初始值为空。如果事务删除了一行，这行实际上并没有从数据库中删除，而只是通过设置`deleted_by`字段为请求删除的事务ID从而标记删除。晚些时候，当确定没有事务再访问被删除的数据时，数据库中的垃圾回收进程删除所有被标记要删除的行并回收空间。
 
-An update is internally translated into a delete and a create. For example, in Figure   7-7, transaction 13 deducts $ 100 from account 2, changing the balance from $ 500 to $ 400. The accounts table now actually contains two rows for account 2: a row with a balance of $ 500 which was marked as deleted by transaction 13, and a row with a balance of $ 400 which was created by transaction 13.
+一次更新请求再内部被转换为一次删除请求和一次创建请求。举个例子，在图7-7中，事务13从账户2中扣除了100块，余额从500块变成了400块。账户表现在实际上包含两个账户2的行：一行余额500块被事务13标记为删除，一行余额400块被事务13创建。
 
-#### Visibility rules for observing a consistent snapshot
+#### 观察一致性快照的可见性规则
 
-When a transaction reads from the database, transaction IDs are used to decide which objects it can see and which are invisible. By carefully defining visibility rules, the database can present a consistent snapshot of the database to the application. This works as follows: 
+当事务读取数据库时，会用事务ID决定哪些对象它能看到而哪些是不可见的。通过小心地定义可见性规则，数据库可以向应用呈现数据库的一致性快照。工作方法如下：
 
-1. At the start of each transaction, the database makes a list of all the other transactions that are in progress (not yet committed or aborted) at that time. Any writes that those transactions have made are ignored, even if the transactions subsequently commit. 
+1. 在每个事务开始的时候，数据库构建一个那个时候所有其它正在进行的（还没有提交或中止的）事务列表。这些事务发起的任何写入都被忽略掉，哪怕之后事务提交了。
 
-2. Any writes made by aborted transactions are ignored. 
+2. 任何中止了的事务发起的写入被忽略掉。
 
-3. Any writes made by transactions with a later transaction ID (i.e., which started after the current transaction started) are ignored, regardless of whether those transactions have committed. 
+3. 有着更新的事务ID的（即在当前事务启动之后启动的）的事务发起的任何写入被忽略掉，而不管这些事务有没有提交。
 
-4. All other writes are visible to the application’s queries. 
+4. 其它所有的写入对应用的查询都可见。
 
-These rules apply to both creation and deletion of objects. In Figure   7-7, when transaction 12 reads from account 2, it sees a balance of $ 500 because the deletion of the $ 500 balance was made by transaction 13 (according to rule 3, transaction 12 cannot see a deletion made by transaction 13), and the creation of the $ 400 balance is not yet visible (by the same rule). Put another way, an object is visible if both of the following conditions are true: 
+这些规则同时使用与对象的创建与删除。在图7-7中，当事务12读了账户2，因为500块余额的删除动作是事务13发起的，于是它看到了500块余额（根据规则3，事务12看不到事务13发起的删除动作），而400块余额的创建也还不可见（由于同样的规则）。换句话说，如果下列两个条件都为真那么对象是可见的：
 
-* At the time when the reader’s transaction started, the transaction that created the object had already committed. 
+* 当读者的事务启动时，事务构建的对象已经提交了。
 
-* The object is not marked for deletion, or if it is, the transaction that requested deletion had not yet committed at the time when the reader’s transaction started. 
+* 对象没有删除的标记，或者如果有，读者事务启动时请求删除的事务还没有提交。
 
-A long-running transaction may continue using a snapshot for a long time, continuing to read values that (from other transactions’ point of view) have long been overwritten or deleted. By never updating values in place but instead creating a new version every time a value is changed, the database can provide a consistent snapshot while incurring only a small overhead.
+长时间运行的事务会持续使用一个快照很长时间，继续读取那些（从其它事务的角度看）很早就被覆盖或者是删除了的值。通过从来不就地更新值而是每当值发生变化就创建一个新版本，数据库在产生很小开销的同时提供了一致性快照。
 
-#### Indexes and snapshot isolation
+#### 索引与快照隔离
 
-How do indexes work in a multi-version database? One option is to have the index simply point to all versions of an object and require an index query to filter out any object versions that are not visible to the current transaction. When garbage collection removes old object versions that are no longer visible to any transaction, the corresponding index entries can also be removed. 
+在一个多版本数据库中索引是如何工作的呢？一种选择是让索引直接指向所有版本的对象然后要求索引请求过滤掉任何对当前事务不可见的对象版本。当垃圾处理移除了对任何事务都不可见的旧对象版本时，对应的索引条目也会被删除。
 
-In practice, many implementation details determine the performance of multi-version concurrency control. For example, PostgreSQL has optimizations for avoiding index updates if different versions of the same object can fit on the same page [31]. Another approach is used in CouchDB, Datomic, and LMDB. Although they also use B-trees (see “B-Trees”), they use an append-only/ copy-on-write variant that does not overwrite pages of the tree when they are updated, but instead creates a new copy of each modified page. Parent pages, up to the root of the tree, are copied and updated to point to the new versions of their child pages. Any pages that are not affected by a write do not need to be copied, and remain immutable [33, 34, 35]. 
+实践中，许多实现细节决定了多版本并发控制的性能。举个例子，如果同一个对象的不同版本可以放在同一个页面，PostgreSQL为了避免索引更新而进行了优化。另外一个方法用在了CouchDB、Datomic以及LMDB。虽然他们也使用B树（见“B树”一节），但是当页面更新时它们使用不会覆盖树中的页的只附加/写入时复制变种，而是构建每个被修改的页的新拷贝。父页，最高到树的根节点，被拷贝并更新到指向新版本的子页面。任何没有收到写入影响的页面不需要被拷贝，而是保持不变。
 
-With append-only B-trees, every write transaction (or batch of transactions) creates a new B-tree root, and a particular root is a consistent snapshot of the database at the point in time when it was created. There is no need to filter out objects based on transaction IDs because subsequent writes cannot modify an existing B-tree; they can only create new tree roots. However, this approach also requires a background process for compaction and garbage collection.
+对于只附加的B树，每一个写入事务（或者是一批事务）构建一个新的B树根节点，其中一个特定的根节点是数据库创建时的一致性快照。由于之后的写入不会修改已有的B树，所以没有必要按照事务ID过滤对象；它们只会创建新的树的根节点。然而，这种方式也需要一个北京进程用来压缩与垃圾回收。
 
 #### Repeatable read and naming confusion
 
