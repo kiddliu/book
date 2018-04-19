@@ -264,7 +264,7 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 * 如果事务更新数个对象，脏写回导致恶劣的后果。举个例子，考虑一下图7-5，它展示一个二手车销售网站，其中两个人Alice和Bob，同时尝试购买同一部车。买一部车需要两次数据库写入：网站列表需要被更新来体现买家，而销售发票需要发送给买家。在图7-5的场景中，销售结果授予了Bob（因为她对销售列表所在的表进行了最终写入），但是发票却寄给了Alice（因为她对发票所在的表进行了最终写入）。提交读防止了这样的事故。
 
-* 然而，提交读不不能防止图7-1中的两个计数器增加一的竞争条件。在这种情况下，第二次写如发生在第一个事务提交之后，所以这不是脏写。但是它仍然不对，却是由于另外一个原因——在“防止丢失的更新”我们回讨论如何使这样的计数器加一是安全的。
+* 然而，提交读不不能防止图7-1中的两个计数器增加一的竞争条件。在这种情况下，第二次写如发生在第一个事务提交之后，所以这不是脏写。但是它仍然不对，却是由于另外一个原因——在“防止丢失更新的数据”我们回讨论如何使这样的计数器加一是安全的。
 
 *图7-5 有脏写的话，来自不同事务的冲突写入会混在一起。*
 
@@ -354,12 +354,104 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 对于只附加的B树，每一个写入事务（或者是一批事务）构建一个新的B树根节点，其中一个特定的根节点是数据库创建时的一致性快照。由于之后的写入不会修改已有的B树，所以没有必要按照事务ID过滤对象；它们只会创建新的树的根节点。然而，这种方式也需要一个北京进程用来压缩与垃圾回收。
 
-#### Repeatable read and naming confusion
+#### 可重复读与命名困惑
 
-Snapshot isolation is a useful isolation level, especially for read-only transactions. However, many databases that implement it call it by different names. In Oracle it is called serializable, and in PostgreSQL and MySQL it is called repeatable read [23]. 
+快照隔离是有用的隔离级别，特别是对于只读事务。然而，许多实现了它的数据库用不同的名字称呼它。在Oracle里叫做*可串行化*，在PostgreSQL和MySQL里叫做*可重复读*。
 
-The reason for this naming confusion is that the SQL standard doesn’t have the concept of snapshot isolation, because the standard is based on System R’s 1975 definition of isolation levels [2] and snapshot isolation hadn’t yet been invented then. Instead, it defines repeatable read, which looks superficially similar to snapshot isolation. PostgreSQL and MySQL call their snapshot isolation level repeatable read because it meets the requirements of the standard, and so they can claim standards compliance. 
+这种命名困惑的原因是SQL标准并没有快照隔离的概念，标准是基于System R 1975年对隔离级别的定义而那个时候快找个里还没有被发明出来。然而，他定义了可重复读，从表面上看它与快照隔离非常类似。PostgreSQL以及MySQL把它们的快找个里叫做可重复读是因为它满足了标准的要求，于是它们可以声明是符合标准的。
 
-Unfortunately, the SQL standard’s definition of isolation levels is flawed — it is ambiguous, imprecise, and not as implementation-independent as a standard should be [28]. Even though several databases implement repeatable read, there are big differences in the guarantees they actually provide, despite being ostensibly standardized [23]. There has been a formal definition of repeatable read in the research literature [29, 30], but most implementations don’t satisfy that formal definition. And to top it off, IBM DB2 uses “repeatable read” to refer to serializability [8]. 
+不幸的是，SQL标准对于隔离级别的定义是有缺陷的——它有歧义，也不精确，更不是标准应有的那样与实现无关。虽然好几个数据库实现了可重复读，尽管表面上是标准化的可它们实际提供的保证有很大的差别。学术文献中对可重复读已经有了正式的定义，但是绝大部分实现不满足这个正式定义。而最糟糕的是，IBM DB2用“可重复读”来指代可串行化。
 
-As a result, nobody really knows what repeatable read means.
+所以，没有人真的知道可重复读到底是什么意思。
+
+### 防止丢失更新的数据
+
+截至目前我们讨论了的提交读与快照隔离主要是关于在出现并发写入时只读事务可以看到什么的保证。我们几乎完全忽略了两个并发写入的事务问题——我们只讨论了脏写（见“不脏写”），一种可能发生的特定类型写入-写入冲突。
+
+还有好几种其它有意思的并发写入事务之间的冲突。其中最有名的问题时丢失更新数据问题，如图7-1中两个并发计数器加一的例子所示。
+
+如果应用从数据库读取某些值，修改了它，然后把修改后的值写回去（一个读取-修改-写入周期）丢失更新问题就会发生。如果两个事务同时这样做，其中的一个修改就会丢失，因为第二个写入没有包括第一个的修改结果。（优势我们说稍后的写入覆盖了稍前的写入。）这个模式会发生在好几个不同的场景中：
+
+* 计数器加一或者更新账户余额（需要读取当前的值，计算新值，然后把更新了的值写回去）
+
+* 对复杂的值进行本地改动，比如，添加一个元素到JSON文档中的列表中（需要解析分档，做变动，然后把修改后的文档写回去）
+
+* 两个用户同时修改一个维基页面，每个用户通过发送整个页面内容到服务器来保存他们的修改，覆盖任何当前在数据库中的内容
+
+因为这是一个常见问题，所以开发出了各种解决方案。
+
+#### 原子写操作
+
+许多数据库提供了原子更新操作，有了它就不再需要在应用程序代码中实现读取-修改-写入周期。如果你的代码可以用这些操作表达，这通常是最佳方案。比如说，下边的指令在大多数关系型数据库中是并发安全的：
+
+```SQL
+UPDATE counters SET value = value + 1 WHERE key = 'foo';
+```
+
+类似地，文档型数据库，例如MongoDB，提供对JSON文档的一部分进行本地修改的原子操作，而Redis提供修改诸如优先队列这样的数据结构的原子操作。并不是所有的写入操作都可以简单地用原子操作表达——比如，对一个维基页面的更新牵扯到任意的文字编辑——但是在可以使用原子操作的情况下，他们通常都是最佳选择。
+
+原子操作的实现一般是通过获取对象的独占锁，当对象被读取时其它事务无法读取直至更新被应用。这个技巧被称为*游标稳定性*。另一种选择是强制所有的原子操作执行在单线程上。
+
+不幸的是，对象关系映射框架使得很容易意外写出执行不安全的读取-修改-写入周期的代码而不是使用数据库提供的原子操作。如果你知道你在做什么这不是个问题，但是它很可能是通过测试也难以发现的微妙错误的来源。
+
+#### 显式锁定
+
+Another option for preventing lost updates, if the database’s built-in atomic operations don’t provide the necessary functionality, is for the application to explicitly lock objects that are going to be updated. Then the application can perform a read-modify-write cycle, and if any other transaction tries to concurrently read the same object, it is forced to wait until the first read-modify-write cycle has completed. 
+
+For example, consider a multiplayer game in which several players can move the same figure concurrently. In this case, an atomic operation may not be sufficient, because the application also needs to ensure that a player’s move abides by the rules of the game, which involves some logic that you cannot sensibly implement as a database query. Instead, you may use a lock to prevent two players from concurrently moving the same piece, as illustrated in Example   7-1.
+
+Example 7-1. Explicitly locking rows to prevent lost updates
+
+---
+
+```SQL
+BEGIN TRANSACTION;
+
+SELECT * FROM figures 
+    WHERE name = 'robot' AND game_id = 222 
+    FOR UPDATE; 
+
+-- Check whether move is valid, then update the position 
+-- of the piece that was returned by the previous SELECT. 
+UPDATE figures SET position = 'c4' WHERE id = 1234; 
+
+COMMIT;
+```
+
+The FOR UPDATE clause indicates that the database should take a lock on all rows returned by this query. 
+
+This works, but to get it right, you need to carefully think about your application logic. It’s easy to forget to add a necessary lock somewhere in the code, and thus introduce a race condition.
+
+#### 自动检测丢失的更新数据
+
+Atomic operations and locks are ways of preventing lost updates by forcing the read-modify-write cycles to happen sequentially. An alternative is to allow them to execute in parallel and, if the transaction manager detects a lost update, abort the transaction and force it to retry its read-modify-write cycle. 
+
+An advantage of this approach is that databases can perform this check efficiently in conjunction with snapshot isolation. Indeed, PostgreSQL’s repeatable read, Oracle’s serializable, and SQL Server’s snapshot isolation levels automatically detect when a lost update has occurred and abort the offending transaction. However, MySQL/ InnoDB’s repeatable read does not detect lost updates [23]. Some authors [28, 30] argue that a database must prevent lost updates in order to qualify as providing snapshot isolation, so MySQL does not provide snapshot isolation under this definition. 
+
+Lost update detection is a great feature, because it doesn’t require application code to use any special database features — you may forget to use a lock or an atomic operation and thus introduce a bug, but lost update detection happens automatically and is thus less error-prone.
+
+#### 比较然后设置
+
+In databases that don’t provide transactions, you sometimes find an atomic compare-and-set operation (previously mentioned in “Single-object writes”). The purpose of this operation is to avoid lost updates by allowing an update to happen only if the value has not changed since you last read it. If the current value does not match what you previously read, the update has no effect, and the read-modify-write cycle must be retried. 
+
+For example, to prevent two users concurrently updating the same wiki page, you might try something like this, expecting the update to occur only if the content of the page hasn’t changed since the user started editing it:
+
+```SQL
+-- This may or may not be safe, depending on the database implementation 
+UPDATE wiki_pages SET content = 'new content'
+    WHERE id = 1234 AND content = 'old content';
+```
+
+If the content has changed and no longer matches 'old content', this update will have no effect, so you need to check whether the update took effect and retry if necessary. However, if the database allows the WHERE clause to read from an old snapshot, this statement may not prevent lost updates, because the condition may be true even though another concurrent write is occurring. Check whether your database’s compare-and-set operation is safe before relying on it.
+
+#### 解决冲突与复制
+
+In replicated databases (see Chapter   5), preventing lost updates takes on another dimension: since they have copies of the data on multiple nodes, and the data can potentially be modified concurrently on different nodes, some additional steps need to be taken to prevent lost updates. 
+
+Locks and compare-and-set operations assume that there is a single up-to-date copy of the data. However, databases with multi-leader or leaderless replication usually allow several writes to happen concurrently and replicate them asynchronously, so they cannot guarantee that there is a single up-to-date copy of the data. Thus, techniques based on locks or compare-and-set do not apply in this context. (We will revisit this issue in more detail in “Linearizability”.) 
+
+Instead, as discussed in “Detecting Concurrent Writes”, a common approach in such replicated databases is to allow concurrent writes to create several conflicting versions of a value (also known as siblings), and to use application code or special data structures to resolve and merge these versions after the fact. 
+
+Atomic operations can work well in a replicated context, especially if they are commutative (i.e., you can apply them in a different order on different replicas, and still get the same result). For example, incrementing a counter or adding an element to a set are commutative operations. That is the idea behind Riak 2.0 datatypes, which prevent lost updates across replicas. When a value is concurrently updated by different clients, Riak automatically merges together the updates in such a way that no updates are lost [39]. 
+
+On the other hand, the last write wins (LWW) conflict resolution method is prone to lost updates, as discussed in “Last write wins (discarding concurrent writes)”. Unfortunately, LWW is the default in many replicated databases.
