@@ -176,9 +176,9 @@ SELECT COUNT(*) FROM emails WHERE recipient_id = 2 AND unread_flag = true
 
 这些问题会令人难以置信地困惑，所以存储引擎几乎普遍提供单节点上的单对象（比如键值对）级别的原子性与隔离性。原子性在针对崩溃恢复时可以用日志实现（见“使B树稳定”一节），而隔离性可以用每个对象的锁来实现（同一时刻只允许一个线程访问对象）。
 
-一些数据库孩提攻了更复杂的原子操作，比如增量操作，它消除了对如图7-1所示的读取-修改-写入循环的需求。类似的流行操作还有比较并设置操作，它使得写入只有在值没有并发地被其它人修改才会发生（见“比较并设置”一节）。
+一些数据库孩提攻了更复杂的原子操作，比如增量操作，它消除了对如图7-1所示的读取-修改-写入循环的需求。类似的流行操作还有比较然后设置操作，它使得写入只有在值没有并发地被其它人修改才会发生（见“比较然后设置”一节）。
 
-这些单对象操作很有用，因为它们可以防止好几个客户端并发尝试写入同一个对象时丢失更新的数据（见“防止丢失更新的数据”）。然而，它们不是通常意义上的事务。比较并设置以及其它单对象操作由于商业目的已经被称为“轻量级事务”，甚至是“ACID”，但是这些术语都是误导人的。事务通常被理解为一种把在多个对象上的多个操作分组成单个操作单元的机制。
+这些单对象操作很有用，因为它们可以防止好几个客户端并发尝试写入同一个对象时丢失更新的数据（见“防止丢失更新的数据”）。然而，它们不是通常意义上的事务。比较然后设置以及其它单对象操作由于商业目的已经被称为“轻量级事务”，甚至是“ACID”，但是这些术语都是误导人的。事务通常被理解为一种把在多个对象上的多个操作分组成单个操作单元的机制。
 
 #### 多对象事务的需要
 
@@ -396,45 +396,45 @@ UPDATE counters SET value = value + 1 WHERE key = 'foo';
 
 #### 显式锁定
 
-Another option for preventing lost updates, if the database’s built-in atomic operations don’t provide the necessary functionality, is for the application to explicitly lock objects that are going to be updated. Then the application can perform a read-modify-write cycle, and if any other transaction tries to concurrently read the same object, it is forced to wait until the first read-modify-write cycle has completed. 
+如果数据库内建的原子操作没有提供必要的功能，那么防止丢失更新的另一种选择是应用显式地锁定即将被更新的对象。然后应用而可以执行读取-修改-写入周期，如果任何其它事务尝试并发地读取同一个对象，会被强制等待直到第一个读取-修改-写入周期完成。
 
-For example, consider a multiplayer game in which several players can move the same figure concurrently. In this case, an atomic operation may not be sufficient, because the application also needs to ensure that a player’s move abides by the rules of the game, which involves some logic that you cannot sensibly implement as a database query. Instead, you may use a lock to prevent two players from concurrently moving the same piece, as illustrated in Example   7-1.
+举个例子，设想一个多人游戏，游戏中好几个玩家都可以并发移动同一个人物。在这种情况下，一个原子操作已经不够用了，因为应用程序也需要保证玩家的行动遵守游戏的规则，设计到某些不能实现为数据库查询的逻辑。而是你可以使用锁来防止两个玩家同时移动同一个对象，如示例7-1所示。
 
-Example 7-1. Explicitly locking rows to prevent lost updates
+*Example 7-1 显式锁定行，防止丢失更新的数据*
 
 ---
 
 ```SQL
 BEGIN TRANSACTION;
 
-SELECT * FROM figures 
-    WHERE name = 'robot' AND game_id = 222 
-    FOR UPDATE; 
+SELECT * FROM figures
+    WHERE name = 'robot' AND game_id = 222
+    FOR UPDATE; ➊
 
--- Check whether move is valid, then update the position 
--- of the piece that was returned by the previous SELECT. 
-UPDATE figures SET position = 'c4' WHERE id = 1234; 
+-- Check whether move is valid, then update the position
+-- of the piece that was returned by the previous SELECT.
+UPDATE figures SET position = 'c4' WHERE id = 1234;
 
 COMMIT;
 ```
 
-The FOR UPDATE clause indicates that the database should take a lock on all rows returned by this query. 
+➊ `FOR UPDATE`语句表明数据库应该为这个查询返回的所有行加锁。
 
-This works, but to get it right, you need to carefully think about your application logic. It’s easy to forget to add a necessary lock somewhere in the code, and thus introduce a race condition.
+这是可行的，但是要做对，你需要仔细地考虑应用程序的逻辑。代码的某处忘记加上必要的锁是很轻易就发生的，并因此导致了竞争条件。
 
 #### 自动检测丢失的更新数据
 
-Atomic operations and locks are ways of preventing lost updates by forcing the read-modify-write cycles to happen sequentially. An alternative is to allow them to execute in parallel and, if the transaction manager detects a lost update, abort the transaction and force it to retry its read-modify-write cycle. 
+原子操作与锁都是通过强制读取-修改-写入周期按顺序发生来防止丢失更新数据的方式。一种替代方式是允许他们并行执行，当事务管理器检测到丢失了更新数据，中止事务并强制它重启读取-修改-写入周期。
 
-An advantage of this approach is that databases can perform this check efficiently in conjunction with snapshot isolation. Indeed, PostgreSQL’s repeatable read, Oracle’s serializable, and SQL Server’s snapshot isolation levels automatically detect when a lost update has occurred and abort the offending transaction. However, MySQL/ InnoDB’s repeatable read does not detect lost updates [23]. Some authors [28, 30] argue that a database must prevent lost updates in order to qualify as providing snapshot isolation, so MySQL does not provide snapshot isolation under this definition. 
+这种方式的优势是结合快照隔离数据库可以高效地执行这种检测。确实，PostgreSQL的可重复读，Oracle的可串行化以及SQL Server的快照隔离级别都会自动检测何时丢失了更新数据并中止出错的事务。然而，MySQL/InnoDB的可重复读并不检测丢失的更新。有些作者争辩说数据库必须防止丢失更新才算提供了快照隔离，所以在这种定义之下MySQL就不算提供了快照隔离。
 
-Lost update detection is a great feature, because it doesn’t require application code to use any special database features — you may forget to use a lock or an atomic operation and thus introduce a bug, but lost update detection happens automatically and is thus less error-prone.
+丢失更新的检测是一个伟大的功能，因为它不要求应用程序代码使用任何特殊的数据库功能——你会忘记使用锁或者原子操作并因而引入bug，但是丢失更新的检测是自动发生的因而不太容易出错。
 
 #### 比较然后设置
 
-In databases that don’t provide transactions, you sometimes find an atomic compare-and-set operation (previously mentioned in “Single-object writes”). The purpose of this operation is to avoid lost updates by allowing an update to happen only if the value has not changed since you last read it. If the current value does not match what you previously read, the update has no effect, and the read-modify-write cycle must be retried. 
+在不提供事务的数据库中，有时你会看到一个原子性的比较然后设置操作（之前在“单对象写入”一节中提到过）。这个操作的目的是防止丢失更新，如果值自从上一次读取都一致没变的情况下才允许更新。如果当前的值与先前读到的值不匹配，那么更新是无效的，于是必须重试读取-修改-写入周期。
 
-For example, to prevent two users concurrently updating the same wiki page, you might try something like this, expecting the update to occur only if the content of the page hasn’t changed since the user started editing it:
+举个例子，为了防止两个用户同时更新同一个维基页面，你可以尝试下面的语句，期待更新只有在页面内容自从用户开始编辑时都没有更新才发生：
 
 ```SQL
 -- This may or may not be safe, depending on the database implementation 
@@ -442,7 +442,7 @@ UPDATE wiki_pages SET content = 'new content'
     WHERE id = 1234 AND content = 'old content';
 ```
 
-If the content has changed and no longer matches 'old content', this update will have no effect, so you need to check whether the update took effect and retry if necessary. However, if the database allows the WHERE clause to read from an old snapshot, this statement may not prevent lost updates, because the condition may be true even though another concurrent write is occurring. Check whether your database’s compare-and-set operation is safe before relying on it.
+如果内容已经改变并且与`'old content'`不同，这次更新动作没有任何效果，所以你需要检查更新是否生效，如果必要还要重试。然而，如果数据库允许`WHERE`语句读取旧的快照，这个语句也没办法阻止丢失更新，毕竟即使另一个并发写入正在进行条件也为真。必须检查数据库的比较然后设置操作是否安全之后才能决定是否依赖它。
 
 #### 解决冲突与复制
 
