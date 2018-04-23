@@ -455,3 +455,120 @@ UPDATE wiki_pages SET content = 'new content'
 原子操作在复制的数据库可以工作得很好，特别是在它们满足交换律（即，你可以在不同的副本上以不同的顺序应用它们，并且仍然得到相同的结果）的情况下。举个例子，计数器加一或者添加元素到集合是都是可交换操作。这就是Riak 2.0版本数据类型背后的理念，它可以防止副本之间丢失更新。当一个之同时被几个不同的客户端更新时，Riak自动合并所有的更新使得没有更新会被丢掉。
 
 另一方面，以最后一次写入为准（LWW）的冲突解决方法很容易丢失更新，正如在“以最后一次写入为准（丢弃并发写入）”一节讨论到的。不幸的是，LWW时许多复制的数据库的默认选项。
+
+### 写偏与幻影
+
+在之前几节我们认识了脏写与丢失了的更新——两种在不同事物同时尝试写入同一个对象时会发生的竞争条件。为了防止数据被破坏，就需要避免竞争条件的发生——要么数据库自动完成，要么使用锁或者原子写入操作这种手动保护。
+
+然而，它们并不是同时写入时可能发生的最后两种竞争条件。在这一节我们会看到一些更微妙的冲突示例。
+
+首先，设想这样的例子：你正在为医生们管理他们在医院随叫随到的轮班写应用程序。医院通常尝试同一时间有好几名医生随时待命，但是它必须至少有一名医生待命。医生们可以放弃他们的轮班（比如，他们自己病了），只要至少有一位同事在那个班次中继续工作。
+
+现在假设Alice和Bob是两个特定轮班的值班医生。两个人都感觉不舒服，所以他们都决定请假。不幸的是，他们大约同时点击了去值的按钮。接下来发生的事如图7-8所示。
+
+*图7-8 写偏造成应用程序bug的例子*
+
+在每一个事务中，你的应用首先检查两个或者更多医生目前当值；如果是，它假设一个医生去值是安全的。由于数据库使用的是快照隔离，两个检查都返回2，所以两个事务都进入到下一个阶段。Alice更新了自己的记录以去值，而Bob也这样做了。两个事务提交，于是现在没有医生在值了。违反了必须有至少一个医生在值的需求。
+
+In each transaction, your application first checks that two or more doctors are currently on call; if yes, it assumes it’s safe for one doctor to go off call. Since the database is using snapshot isolation, both checks return 2, so both transactions proceed to the next stage. Alice updates her own record to take herself off call, and Bob updates his own record likewise. Both transactions commit, and now no doctor is on call. Your requirement of having at least one doctor on call has been violated.
+
+#### Characterizing write skew
+
+This anomaly is called write skew [28]. It is neither a dirty write nor a lost update, because the two transactions are updating two different objects (Alice’s and Bob’s on-call records, respectively). It is less obvious that a conflict occurred here, but it’s definitely a race condition: if the two transactions had run one after another, the second doctor would have been prevented from going off call. The anomalous behavior was only possible because the transactions ran concurrently. 
+
+You can think of write skew as a generalization of the lost update problem. Write skew can occur if two transactions read the same objects, and then update some of those objects (different transactions may update different objects). In the special case where different transactions update the same object, you get a dirty write or lost update anomaly (depending on the timing). 
+
+We saw that there are various different ways of preventing lost updates. With write skew, our options are more restricted: 
+
+* Atomic single-object operations don’t help, as multiple objects are involved. 
+
+* The automatic detection of lost updates that you find in some implementations of snapshot isolation unfortunately doesn’t help either: write skew is not automatically detected in PostgreSQL’s repeatable read, MySQL/ InnoDB’s repeatable read, Oracle’s serializable, or SQL Server’s snapshot isolation level [23]. Automatically preventing write skew requires true serializable isolation (see “Serializability”).
+
+* Some databases allow you to configure constraints, which are then enforced by the database (e.g., uniqueness, foreign key constraints, or restrictions on a particular value). However, in order to specify that at least one doctor must be on call, you would need a constraint that involves multiple objects. Most databases do not have built-in support for such constraints, but you may be able to implement them with triggers or materialized views, depending on the database [42].
+
+* If you can’t use a serializable isolation level, the second-best option in this case is probably to explicitly lock the rows that the transaction depends on. In the doctors example, you could write something like the following: 
+
+```SQL
+BEGIN TRANSACTION;
+
+SELECT * FROM doctors
+  WHERE on_call = true
+  AND shift_id = 1234 FOR UPDATE; ➊
+
+UPDATE doctors
+  SET on_call = false
+  WHERE name = 'Alice'
+  AND shift_id = 1234;
+
+COMMIT; 
+```
+
+➊ As before, FOR UPDATE tells the database to lock all rows returned by this query.
+
+#### More examples of write skew
+
+Write skew may seem like an esoteric issue at first, but once you’re aware of it, you may notice more situations in which it can occur. Here are some more examples: 
+
+*Meeting room booking system* 
+
+Say you want to enforce that there cannot be two bookings for the same meeting room at the same time [43]. When someone wants to make a booking, you first check for any conflicting bookings (i.e., bookings for the same room with an overlapping time range), and if none are found, you create the meeting (see Example   7-2). ix 
+
+*Example 7-2. A meeting room booking system tries to avoid double-booking (not safe under snapshot isolation)* 
+
+```SQL
+BEGIN TRANSACTION;
+
+-- Check for any existing bookings that overlap with the period of noon-1pm
+SELECT COUNT(*) FROM bookings
+  WHERE room_id = 123 AND
+  end_time > '2015-01-01 12: 00' AND start_time < '2015-01-01 13: 00';
+
+-- If the previous query returned zero:
+INSERT INTO bookings
+  (room_id, start_time, end_time, user_id)
+  VALUES (123, '2015-01-01 12: 00', '2015-01-01 13: 00', 666);
+
+COMMIT;
+```
+
+Unfortunately, snapshot isolation does not prevent another user from concurrently inserting a conflicting meeting. In order to guarantee you won’t get scheduling conflicts, you once again need serializable isolation.
+
+*Multiplayer game*
+
+In Example   7-1, we used a lock to prevent lost updates (that is, making sure that two players can’t move the same figure at the same time). However, the lock doesn’t prevent players from moving two different figures to the same position on the board or potentially making some other move that violates the rules of the game. Depending on the kind of rule you are enforcing, you might be able to use a unique constraint, but otherwise you’re vulnerable to write skew. 
+
+*Claiming a username*
+
+On a website where each user has a unique username, two users may try to create accounts with the same username at the same time. You may use a transaction to check whether a name is taken and, if not, create an account with that name. However, like in the previous examples, that is not safe under snapshot isolation. Fortunately, a unique constraint is a simple solution here (the second transaction that tries to register the username will be aborted due to violating the constraint).
+
+*Preventing double-spending*
+
+A service that allows users to spend money or points needs to check that a user doesn’t spend more than they have. You might implement this by inserting a tentative spending item into a user’s account, listing all the items in the account, and checking that the sum is positive [44]. With write skew, it could happen that two spending items are inserted concurrently that together cause the balance to go negative, but that neither transaction notices the other.
+
+#### Phantoms causing write skew
+
+All of these examples follow a similar pattern:
+
+1. A SELECT query checks whether some requirement is satisfied by searching for rows that match some search condition (there are at least two doctors on call, there are no existing bookings for that room at that time, the position on the board doesn’t already have another figure on it, the username isn’t already taken, there is still money in the account). 
+
+2. Depending on the result of the first query, the application code decides how to continue (perhaps to go ahead with the operation, or perhaps to report an error to the user and abort). 
+
+3. If the application decides to go ahead, it makes a write (INSERT, UPDATE, or DELETE) to the database and commits the transaction. 
+
+    The effect of this write changes the precondition of the decision of step 2. In other words, if you were to repeat the SELECT query from step 1 after commiting the write, you would get a different result, because the write changed the set of rows matching the search condition (there is now one fewer doctor on call, the meeting room is now booked for that time, the position on the board is now taken by the figure that was moved, the username is now taken, there is now less money in the account). 
+
+The steps may occur in a different order. For example, you could first make the write, then the SELECT query, and finally decide whether to abort or commit based on the result of the query. 
+
+In the case of the doctor on call example, the row being modified in step 3 was one of the rows returned in step 1, so we could make the transaction safe and avoid write skew by locking the rows in step 1 (SELECT FOR UPDATE). However, the other four examples are different: they check for the absence of rows matching some search condition, and the write adds a row matching the same condition. If the query in step 1 doesn’t return any rows, SELECT FOR UPDATE can’t attach locks to anything. 
+
+This effect, where a write in one transaction changes the result of a search query in another transaction, is called a phantom [3]. Snapshot isolation avoids phantoms in read-only queries, but in read-write transactions like the examples we discussed, phantoms can lead to particularly tricky cases of write skew.
+
+#### Materializing conflicts
+
+If the problem of phantoms is that there is no object to which we can attach the locks, perhaps we can artificially introduce a lock object into the database? 
+
+For example, in the meeting room booking case you could imagine creating a table of time slots and rooms. Each row in this table corresponds to a particular room for a particular time period (say, 15 minutes). You create rows for all possible combinations of rooms and time periods ahead of time, e.g. for the next six months. 
+
+Now a transaction that wants to create a booking can lock (SELECT FOR UPDATE) the rows in the table that correspond to the desired room and time period. After it has acquired the locks, it can check for overlapping bookings and insert a new booking as before. Note that the additional table isn’t used to store information about the booking — it’s purely a collection of locks which is used to prevent bookings on the same room and time range from being modified concurrently. 
+
+This approach is called materializing conflicts, because it takes a phantom and turns it into a lock conflict on a concrete set of rows that exist in the database [11]. Unfortunately, it can be hard and error-prone to figure out how to materialize conflicts, and it’s ugly to let a concurrency control mechanism leak into the application data model. For those reasons, materializing conflicts should be considered a last resort if no alternative is possible. A serializable isolation level is much preferable in most cases.
