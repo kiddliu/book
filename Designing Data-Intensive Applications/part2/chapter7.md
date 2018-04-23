@@ -446,12 +446,12 @@ UPDATE wiki_pages SET content = 'new content'
 
 #### 解决冲突与复制
 
-In replicated databases (see Chapter   5), preventing lost updates takes on another dimension: since they have copies of the data on multiple nodes, and the data can potentially be modified concurrently on different nodes, some additional steps need to be taken to prevent lost updates. 
+在复制的数据库中（见第五章），防止丢失更新发生在另外一个维度：既然它们在数个节点上有数据的多份拷贝，且数据很有可能在不同的节点上同时被修改，于是需要采取一些额外步骤来防止丢失更新。
 
-Locks and compare-and-set operations assume that there is a single up-to-date copy of the data. However, databases with multi-leader or leaderless replication usually allow several writes to happen concurrently and replicate them asynchronously, so they cannot guarantee that there is a single up-to-date copy of the data. Thus, techniques based on locks or compare-and-set do not apply in this context. (We will revisit this issue in more detail in “Linearizability”.) 
+锁与比较然后设置操作都假设有一份最新的数据拷贝。然而，支持多主机复制或者无主机复制的数据库通常允许好几个写入同时发生并且异步地复制它们，所以它们无法保证有一份最新的数据拷贝。因此，基于锁或者比较然后设置操作的技术在这里都不适用。（我们会在“可线性化”一节更详细地重新审视这个问题。）
 
-Instead, as discussed in “Detecting Concurrent Writes”, a common approach in such replicated databases is to allow concurrent writes to create several conflicting versions of a value (also known as siblings), and to use application code or special data structures to resolve and merge these versions after the fact. 
+相反的是，如在“检测并发写入”一节中讨论到的，在这种复制的数据库中一种常见的方法是允许并发写入创建某个值的好几个互相冲突的版本（也叫做sibling），事后使用应用程序代码或者是特殊的数据结构来解决和合并这些版本的数据。
 
-Atomic operations can work well in a replicated context, especially if they are commutative (i.e., you can apply them in a different order on different replicas, and still get the same result). For example, incrementing a counter or adding an element to a set are commutative operations. That is the idea behind Riak 2.0 datatypes, which prevent lost updates across replicas. When a value is concurrently updated by different clients, Riak automatically merges together the updates in such a way that no updates are lost [39]. 
+原子操作在复制的数据库可以工作得很好，特别是在它们满足交换律（即，你可以在不同的副本上以不同的顺序应用它们，并且仍然得到相同的结果）的情况下。举个例子，计数器加一或者添加元素到集合是都是可交换操作。这就是Riak 2.0版本数据类型背后的理念，它可以防止副本之间丢失更新。当一个之同时被几个不同的客户端更新时，Riak自动合并所有的更新使得没有更新会被丢掉。
 
-On the other hand, the last write wins (LWW) conflict resolution method is prone to lost updates, as discussed in “Last write wins (discarding concurrent writes)”. Unfortunately, LWW is the default in many replicated databases.
+另一方面，以最后一次写入为准（LWW）的冲突解决方法很容易丢失更新，正如在“以最后一次写入为准（丢弃并发写入）”一节讨论到的。不幸的是，LWW时许多复制的数据库的默认选项。
