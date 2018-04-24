@@ -470,23 +470,21 @@ UPDATE wiki_pages SET content = 'new content'
 
 在每一个事务中，你的应用首先检查两个或者更多医生目前当值；如果是，它假设一个医生去值是安全的。由于数据库使用的是快照隔离，两个检查都返回2，所以两个事务都进入到下一个阶段。Alice更新了自己的记录以去值，而Bob也这样做了。两个事务提交，于是现在没有医生在值了。违反了必须有至少一个医生在值的需求。
 
-In each transaction, your application first checks that two or more doctors are currently on call; if yes, it assumes it’s safe for one doctor to go off call. Since the database is using snapshot isolation, both checks return 2, so both transactions proceed to the next stage. Alice updates her own record to take herself off call, and Bob updates his own record likewise. Both transactions commit, and now no doctor is on call. Your requirement of having at least one doctor on call has been violated.
-
 #### Characterizing write skew
 
-This anomaly is called write skew [28]. It is neither a dirty write nor a lost update, because the two transactions are updating two different objects (Alice’s and Bob’s on-call records, respectively). It is less obvious that a conflict occurred here, but it’s definitely a race condition: if the two transactions had run one after another, the second doctor would have been prevented from going off call. The anomalous behavior was only possible because the transactions ran concurrently. 
+这种异常现象叫做写偏。它既不是脏写也不是丢失更新，因为两个事务在更新两个不同的对象（分别是Alice的与Bob的当值记录）。并不是很明显地能看出发生了冲突，但是它确实是一个竞争条件：如果两个事务先后执行，第二个医生就不能去值。异常现象只可能在同时运行的时候才会发生。
 
-You can think of write skew as a generalization of the lost update problem. Write skew can occur if two transactions read the same objects, and then update some of those objects (different transactions may update different objects). In the special case where different transactions update the same object, you get a dirty write or lost update anomaly (depending on the timing). 
+你可以把写偏认为是一般化的丢失更新问题。如果两个事务读取同样的几个对象，然后更新其中的一部分（不同的事务更新不同的对象）就会发生写偏。在不同事务更新同一个对象这个特例中，你就会得到脏写或者丢失更新的异常（具体哪一种这取决于发生的时间）。
 
-We saw that there are various different ways of preventing lost updates. With write skew, our options are more restricted: 
+我们知道有许多种不同的方式防止出现丢失更新。对于写偏，我们的选择受到更多限制：
 
-* Atomic single-object operations don’t help, as multiple objects are involved. 
+* 原子单对象操作没有用，因为牵扯多个对象。
 
-* The automatic detection of lost updates that you find in some implementations of snapshot isolation unfortunately doesn’t help either: write skew is not automatically detected in PostgreSQL’s repeatable read, MySQL/ InnoDB’s repeatable read, Oracle’s serializable, or SQL Server’s snapshot isolation level [23]. Automatically preventing write skew requires true serializable isolation (see “Serializability”).
+* 在许多快照隔离实现中的丢失更新自动检测机制不幸地也没有用：在PostgreSQL的可重复读、MySQL/InnoDB的可重复读、Oracle的可串行化以及SQL Server的快照隔离等级中写偏都不是自动检测的。自动防止写偏需要真正的可串行化隔离（见“可串行化”一节）。
 
-* Some databases allow you to configure constraints, which are then enforced by the database (e.g., uniqueness, foreign key constraints, or restrictions on a particular value). However, in order to specify that at least one doctor must be on call, you would need a constraint that involves multiple objects. Most databases do not have built-in support for such constraints, but you may be able to implement them with triggers or materialized views, depending on the database [42].
+* 有些数据库允许你配置约束条件，之后数据库会强制应用（比如，唯一性、外键约束、或者对某个特定值的限制）。然而，为了描述至少有一个医生当值，你需要牵扯到多个对象的约束条件。绝大多数数据库没有对这样的约束条件有内建支持，但是你可以用触发器或是物化视图来实现，具体取决于是那种数据库。
 
-* If you can’t use a serializable isolation level, the second-best option in this case is probably to explicitly lock the rows that the transaction depends on. In the doctors example, you could write something like the following: 
+* 如果没有办法用可串行化隔离等级，那么在这种情况下次好的选择大概是显式地锁定事务依赖地行。在医生例子里，你可以这样写:
 
 ```SQL
 BEGIN TRANSACTION;
@@ -500,20 +498,20 @@ UPDATE doctors
   WHERE name = 'Alice'
   AND shift_id = 1234;
 
-COMMIT; 
+COMMIT;
 ```
 
-➊ As before, FOR UPDATE tells the database to lock all rows returned by this query.
+➊ 跟之前一样, `FOR UPDATE`告诉数据库要锁定这条查询请求返回的所有行。
 
-#### More examples of write skew
+#### 更多写偏的例子
 
-Write skew may seem like an esoteric issue at first, but once you’re aware of it, you may notice more situations in which it can occur. Here are some more examples: 
+写偏起先看起来是一个深奥的问题，可一旦你知道了它，你会注意到其它可能它会发生的场景。这里还有几个例子：
 
-*Meeting room booking system* 
+*会议室预订系统*
 
-Say you want to enforce that there cannot be two bookings for the same meeting room at the same time [43]. When someone wants to make a booking, you first check for any conflicting bookings (i.e., bookings for the same room with an overlapping time range), and if none are found, you create the meeting (see Example   7-2). ix 
+假设你要强制同时对同一个会议室不能有两个预订记录。当某人要进行预订时，首先检查是否有冲突的预订（即，同一个会议室时间重叠的预订），如果没有，创建会议（见示例7-2）。
 
-*Example 7-2. A meeting room booking system tries to avoid double-booking (not safe under snapshot isolation)* 
+*示例7-2 会议预定系统尝试避免双重预订（在快照隔离下不安全）*
 
 ```SQL
 BEGIN TRANSACTION;
@@ -531,17 +529,19 @@ INSERT INTO bookings
 COMMIT;
 ```
 
-Unfortunately, snapshot isolation does not prevent another user from concurrently inserting a conflicting meeting. In order to guarantee you won’t get scheduling conflicts, you once again need serializable isolation.
+不幸的是，快照隔离无法防止另一个用户同时插入冲突的会议预订。为了保证没有预定冲突，你再一次需要可串行化隔离。
 
-*Multiplayer game*
+*多人游戏*
 
-In Example   7-1, we used a lock to prevent lost updates (that is, making sure that two players can’t move the same figure at the same time). However, the lock doesn’t prevent players from moving two different figures to the same position on the board or potentially making some other move that violates the rules of the game. Depending on the kind of rule you are enforcing, you might be able to use a unique constraint, but otherwise you’re vulnerable to write skew. 
+在示例7-1中，我们用锁防止出现丢失更新的问题（也就是，保证两个玩家无法同时移动同一个人物）。然而，锁没有办法防止玩家把两个不同任务移动到棋盘的同一个位置，或者是其它可能违反游戏规则的操作。取决于你强制应用的规则类型，你也许可以使用唯一性约束条件，除此之外很容易发生写偏。
 
-*Claiming a username*
+*选择用户名*
 
-On a website where each user has a unique username, two users may try to create accounts with the same username at the same time. You may use a transaction to check whether a name is taken and, if not, create an account with that name. However, like in the previous examples, that is not safe under snapshot isolation. Fortunately, a unique constraint is a simple solution here (the second transaction that tries to register the username will be aborted due to violating the constraint).
+在每个用户都有独特用户名的网站上，两个用户会尝试同时用同一个用户名创建账户。你会使用事务来检查名字是否被占用了，如果没有，则用那个名字创建账户。然而，与前一个例子类似，在快照隔离级别这是不安全的。幸运的是，唯一性限制就可以简单地解决问题（第二个事务尝试注册那个用户名会因为违反了约束条件而中止）。
 
-*Preventing double-spending*
+*防止双重花费*
+
+一个允许用户花费金钱或是点数的服务需要检查用户的花费不能超过他们拥有的额度。允许你会通过插入临时的支出项目到用户账户，列出所有账户内项目，然后检查和是否为正来实现它。
 
 A service that allows users to spend money or points needs to check that a user doesn’t spend more than they have. You might implement this by inserting a tentative spending item into a user’s account, listing all the items in the account, and checking that the sum is positive [44]. With write skew, it could happen that two spending items are inserted concurrently that together cause the balance to go negative, but that neither transaction notices the other.
 
