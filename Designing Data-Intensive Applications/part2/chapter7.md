@@ -470,7 +470,7 @@ UPDATE wiki_pages SET content = 'new content'
 
 在每一个事务中，你的应用首先检查两个或者更多医生目前当值；如果是，它假设一个医生去值是安全的。由于数据库使用的是快照隔离，两个检查都返回2，所以两个事务都进入到下一个阶段。Alice更新了自己的记录以去值，而Bob也这样做了。两个事务提交，于是现在没有医生在值了。违反了必须有至少一个医生在值的需求。
 
-#### Characterizing write skew
+#### 写偏的特征
 
 这种异常现象叫做写偏。它既不是脏写也不是丢失更新，因为两个事务在更新两个不同的对象（分别是Alice的与Bob的当值记录）。并不是很明显地能看出发生了冲突，但是它确实是一个竞争条件：如果两个事务先后执行，第二个医生就不能去值。异常现象只可能在同时运行的时候才会发生。
 
@@ -541,34 +541,32 @@ COMMIT;
 
 *防止双重花费*
 
-一个允许用户花费金钱或是点数的服务需要检查用户的花费不能超过他们拥有的额度。允许你会通过插入临时的支出项目到用户账户，列出所有账户内项目，然后检查和是否为正来实现它。
+一个允许用户花费金钱或是点数的服务需要检查用户的花费不能超过他们拥有的额度。允许你会通过插入临时的支出项目到用户账户，列出所有账户内项目，然后检查和是否为正来实现它。有了写偏的话，两个支出项目会被同时插入从而导致余额变成负数，但是没有事务意识到对方的存在。
 
-A service that allows users to spend money or points needs to check that a user doesn’t spend more than they have. You might implement this by inserting a tentative spending item into a user’s account, listing all the items in the account, and checking that the sum is positive [44]. With write skew, it could happen that two spending items are inserted concurrently that together cause the balance to go negative, but that neither transaction notices the other.
+#### 导致写偏的幻影
 
-#### Phantoms causing write skew
+所有这些示例都有类似的模式：
 
-All of these examples follow a similar pattern:
+1. `SELECT`查询通过搜索符合某些搜索条件（至少两个医生当值，那个房间那个时候没有被预订，棋盘上的那个位置还没有其它任务在那，用户名没有被占用，账户中还有钱）的行检查某些需求是否被满足。
 
-1. A SELECT query checks whether some requirement is satisfied by searching for rows that match some search condition (there are at least two doctors on call, there are no existing bookings for that room at that time, the position on the board doesn’t already have another figure on it, the username isn’t already taken, there is still money in the account). 
+2. 应用程序代码决定如何继续取决于第一步查询的结果（也许操作继续，也许向用户报告错误并且中止）。
 
-2. Depending on the result of the first query, the application code decides how to continue (perhaps to go ahead with the operation, or perhaps to report an error to the user and abort). 
+3. 如果应用程序代码决定继续，它向数据库发起写入请求（`INSERT`，`UPDATE`或者`DELETE`）并提交事务。
 
-3. If the application decides to go ahead, it makes a write (INSERT, UPDATE, or DELETE) to the database and commits the transaction. 
+    这次写入的效果改变了第二步决定的前提。换句话说，如果在提交写入之后重复第一步的`SELECT`查询，你会得到不一样的结果，因为写入改变了符合搜索条件的行的集合（现在少了一个当值的一生，那个时间会议室被预定了，棋盘上的位置现在被刚刚移动了的人物占据了，用户名现在被占用了，账户里的钱变少了）。
 
-    The effect of this write changes the precondition of the decision of step 2. In other words, if you were to repeat the SELECT query from step 1 after commiting the write, you would get a different result, because the write changed the set of rows matching the search condition (there is now one fewer doctor on call, the meeting room is now booked for that time, the position on the board is now taken by the figure that was moved, the username is now taken, there is now less money in the account). 
+这些步骤可以以不同的顺序发生。举个例子，你可以首先发起写入请求，然后是`SELECT`查询，最后决定到底是中止还是基于查询的结果进行提交。
 
-The steps may occur in a different order. For example, you could first make the write, then the SELECT query, and finally decide whether to abort or commit based on the result of the query. 
+在医生当值的例子中，在第三步被修改的行是第一步返回的行中的一个，所以我们可以通过锁定第一步中的行（`SELECT FOR UPDATE`）使得事务安全并避免写偏。然而，其它四个示例是不同的：它们检查缺失的符合某些搜索条件的行，然后写入请求添加符合同一个条件的一行。如果在第一步中的查询没有返回任何行，`SELECT FOR UPDATE`也就没有办法加锁。
 
-In the case of the doctor on call example, the row being modified in step 3 was one of the rows returned in step 1, so we could make the transaction safe and avoid write skew by locking the rows in step 1 (SELECT FOR UPDATE). However, the other four examples are different: they check for the absence of rows matching some search condition, and the write adds a row matching the same condition. If the query in step 1 doesn’t return any rows, SELECT FOR UPDATE can’t attach locks to anything. 
+这种一个事务中的写入改变了另一个事务中的搜索查询结果，叫做幻影。快照隔离避免了只读查询中的幻影，但是在我们讨论的例子的读写事务中，幻影会导致特别棘手的写偏情况。
 
-This effect, where a write in one transaction changes the result of a search query in another transaction, is called a phantom [3]. Snapshot isolation avoids phantoms in read-only queries, but in read-write transactions like the examples we discussed, phantoms can lead to particularly tricky cases of write skew.
+#### 物化冲突
 
-#### Materializing conflicts
+如果幻影的问题在于没有对象可供我们加锁，也许我们可以人为地将一个所对象引入数据库？
 
-If the problem of phantoms is that there is no object to which we can attach the locks, perhaps we can artificially introduce a lock object into the database? 
+举个例子，在会议室预订场景中你可以设想创建一个时间槽与房间的表。表中的每一行代表特定时间段（假设是15分钟）的特定房间。你可以创建，比如接下来六个月的所有房间与时间段可能的组合。
 
-For example, in the meeting room booking case you could imagine creating a table of time slots and rooms. Each row in this table corresponds to a particular room for a particular time period (say, 15 minutes). You create rows for all possible combinations of rooms and time periods ahead of time, e.g. for the next six months. 
+现在一个事务想要创建预订可以锁定期望的房间与时间段对应的表中的行。获取锁之后，可以如先前一样检查重叠的预订并插入一个新预订。值得注意的是没有用到额外的表来储存预订的信息——它只是一个集合的锁，用来防止并发修改时同时预订同一个房间以及时间段。
 
-Now a transaction that wants to create a booking can lock (SELECT FOR UPDATE) the rows in the table that correspond to the desired room and time period. After it has acquired the locks, it can check for overlapping bookings and insert a new booking as before. Note that the additional table isn’t used to store information about the booking — it’s purely a collection of locks which is used to prevent bookings on the same room and time range from being modified concurrently. 
-
-This approach is called materializing conflicts, because it takes a phantom and turns it into a lock conflict on a concrete set of rows that exist in the database [11]. Unfortunately, it can be hard and error-prone to figure out how to materialize conflicts, and it’s ugly to let a concurrency control mechanism leak into the application data model. For those reasons, materializing conflicts should be considered a last resort if no alternative is possible. A serializable isolation level is much preferable in most cases.
+这种方式叫做物化冲突，因为它把幻影变成了数据库中已存在的行集合上的锁冲突。然而不幸的是找出如何物化冲突是很难的也很容易出错，而让并发控制机制出现在应用程序数据模型中也是很难看的。由于这些原因，物化冲突淫荡被视为没有任何其它可替代项时的最后一搏。绝大多数场景下可串行化隔离级别都是更优先的选择。
