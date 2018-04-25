@@ -609,42 +609,42 @@ COMMIT;
 
 串行执行事务的方式在VoltDB/H-Store、Redis以及Datomic中实现了。为单线程执行设计的系统有的时候要比支持并发的系统性能要好，因为它避免了协调锁定的消耗。然而，它的吞吐量受到单个CPU核心的限制。为了最大限度地发挥单线程的能力，构造的事务与它们的传统形式稍稍有些差别。
 
-#### Encapsulating transactions in stored procedures
+#### 把事务封装在存储过程中
 
-In the early days of databases, the intention was that a database transaction could encompass an entire flow of user activity. For example, booking an airline ticket is a multi-stage process (searching for routes, fares, and available seats; deciding on an itinerary; booking seats on each of the flights of the itinerary; entering passenger details; making payment). Database designers thought that it would be neat if that entire process was one transaction so that it could be committed atomically. 
+在数据库的早期，数据库的目的是数据库事务可以包含整个用户活动流程。举个例子，预订飞机票是一个多阶段的过程（搜索航线，票价，已经可选的座位；确定行程；预订行程中每一个航段的座位；输入乘客信息；付款）。数据库设计师以为如果整个过程是一个事务，于是可以原子提交的话就很棒了。
 
-Unfortunately, humans are very slow to make up their minds and respond. If a database transaction needs to wait for input from a user, the database needs to support a potentially huge number of concurrent transactions, most of them idle. Most databases cannot do that efficiently, and so almost all OLTP applications keep transactions short by avoiding interactively waiting for a user within a transaction. On the web, this means that a transaction is committed within the same HTTP request — a transaction does not span multiple requests. A new HTTP request starts a new transaction. 
+然而，人们做决定做回应都是很慢的。如果数据库事务需要等待用户的输入，那么数据库可能需要支持海量并发事务，其中绝大部分是空闲的。绝大部分数据库无法有效的应对这个问题，所以几乎所有的OLTP应用程序保持事务简短，避免在事务中等待用户互动。在网络上，这意味着事务实在同一个HTTP请求中提交的——一个事务不会跨越多个请求。一个新的HTTP请求开启一个新的事务。
 
-Even though the human has been taken out of the critical path, transactions have continued to be executed in an interactive client/ server style, one statement at a time. An application makes a query, reads the result, perhaps makes another query depending on the result of the first query, and so on. The queries and results are sent back and forth between the application code (running on one machine) and the database server (on another machine). 
+即使人为因素被排除到关键路径意外，事务仍然继续以交互式的客户端/服务器端的方式执行，每次一条语句。应用程序发起查询，读取结果，也许根据第一次查询的结果会再发起另一次查询，等等等等。查询请求与结果在应用程序代码（运行在单个设备上）与数据库服务器（在另外一台设备上）之间来回交换。
 
-In this interactive style of transaction, a lot of time is spent in network communication between the application and the database. If you were to disallow concurrency in the database and only process one transaction at a time, the throughput would be dreadful because the database would spend most of its time waiting for the application to issue the next query for the current transaction. In this kind of database, it’s necessary to process multiple transactions concurrently in order to get reasonable performance. 
+在这种交互式的事务中，许多的时间花费在应用程序与数据库之间的网络通信上。如果在数据库中不允许并发而一次只可以处理一个事务，吞吐量会非常恐怖，因为数据库绝大部分时间都在等待应用程序发起当前事务的下一个查询。在这种数据库中，同时处理数个事务从而获得合理的性能是必要的。
 
-For this reason, systems with single-threaded serial transaction processing don’t allow interactive multi-statement transactions. Instead, the application must submit the entire transaction code to the database ahead of time, as a stored procedure. The differences between these approaches is illustrated in Figure   7-9. Provided that all data required by a transaction is in memory, the stored procedure can execute very fast, without waiting for any network or disk I/ O.
+由于这个原因，有着单线程串行事务处理的系统不允许交互式的多语句事务。而是，应用程序必须首先向数据库提交整个事务代码，作为一个存储过程。这些方法之间的差别如图7-9展示。如果交易所需的所有数据都在内存中，存储过程会执行得很快，无需等待任何网络或者磁盘I/O。
 
-*Figure 7-9. The difference between an interactive transaction and a stored procedure (using the example transaction of Figure   7-8).*
+*图7-9 交互式事务与存储过程间得差别（使用了图7-8中的示例事务）。*
 
-#### Pros and cons of stored procedures
+#### 存储过程的优点与缺点
 
-Stored procedures have existed for some time in relational databases, and they have been part of the SQL standard (SQL/ PSM) since 1999. They have gained a somewhat bad reputation, for various reasons: 
+存储过程在关系型数据库中已经存在了一段时间了，自1999年它就成为了SQL标准（SQL/PSM）的一部分。由于各种原因它的声誉有些不好：
 
-* Each database vendor has its own language for stored procedures (Oracle has PL/ SQL, SQL Server has T-SQL, PostgreSQL has PL/ pgSQL, etc.). These languages haven’t kept up with developments in general-purpose programming languages, so they look quite ugly and archaic from today’s point of view, and they lack the ecosystem of libraries that you find with most programming languages. 
+* 每个数据库厂商都有自己的存储过程语言（Oracle有PL/SQL，SQL Server有T-SQL，PostgreSQL有PL/pgSQL，等等）。这些语言并没有跟上通用编程语言的发展，所以从今天的角度看它们相当丑陋和古老，并且缺乏大多数编程语言都有的开发库生态系统。
 
-* Code running in a database is difficult to manage: compared to an application server, it’s harder to debug, more awkward to keep in version control and deploy, trickier to test, and difficult to integrate with a metrics collection system for monitoring. 
+* 运行在数据库中的代码很难管理：相比于应用服务器，它更难调试，更难以保持版本控制和部署，更难以测试，并且很难与指标收集系统整合进行监控。
 
-* A database is often much more performance-sensitive than an application server, because a single database instance is often shared by many application servers. A badly written stored procedure (e.g., using a lot of memory or CPU time) in a database can cause much more trouble than equivalent badly written code in an application server. 
+* 相比于应用服务器数据库通常对性能更加敏感，因为单个数据库实例经常被多个应用服务器共享。相比于应用服务器中写得不好代码，数据库中写得不好的存储过程（比如，占用了大量内存或是CPU时间）会造成更大的麻烦。
 
-However, those issues can be overcome. Modern implementations of stored procedures have abandoned PL/ SQL and use existing general-purpose programming languages instead: VoltDB uses Java or Groovy, Datomic uses Java or Clojure, and Redis uses Lua. With stored procedures and in-memory data, executing all transactions on a single thread becomes feasible. As they don’t need to wait for I/ O and they avoid the overhead of other concurrency control mechanisms, they can achieve quite good throughput on a single thread. 
+然而，这些问题都可以克服。现代的存储过程实现已经抛弃了PL/SQL转而使用已有的通用编程语言：VoltDB使用Java或者Groovy，Datomic使用Java或者Clojure，而Redis使用Lua。有了存储过程和在内存中的数据，在单个线程上执行所有的事务变为可行了。由于它们不必等待I/O而且避免了其它并发控制机制的消耗，所有它们可以在单线程上实现相当不错的吞吐量。
 
-VoltDB also uses stored procedures for replication: instead of copying a transaction’s writes from one node to another, it executes the same stored procedure on each replica. VoltDB therefore requires that stored procedures are deterministic (when run on different nodes, they must produce the same result). If a transaction needs to use the current date and time, for example, it must do so through special deterministic APIs.
+VoltDB还把存储过程用于复制：不再把事务的写入请求从一个节点拷贝到另外一个节点，而是在每个副本上执行同样的存储过程。VoltDB因此要求存储过程是确定性的（当运行在不同节点上时，它们必须产生同样的结果）。举个例子来说如果事务需要使用同样的日期和时间，它必须通过特定的确定性API来完成。
 
-#### Summary of serial execution
+#### 串行执行的小结
 
-Serial execution of transactions has become a viable way of achieving serializable isolation within certain constraints: 
+事务的串行执行已成为在特定限制条件下实现可串行化隔离的可行方法：
 
-* Every transaction must be small and fast, because it takes only one slow transaction to stall all transaction processing. 
+* 每个事务必须很小且执行得很快，因为只需要一个缓慢的事务就可以阻塞所有事务的处理。
 
-* It is limited to use cases where the active dataset can fit in memory. Rarely accessed data could potentially be moved to disk, but if it needed to be accessed in a single-threaded transaction, the system would get very slow.x 
+* 它仅限于活动数据集可以放入内存的使用场景。很少被访问到的数据可能会被移动到磁盘，一旦需要在单线程事务中访问它，系统将会变得非常缓慢。
 
-* Write throughput must be low enough to be handled on a single CPU core, or else transactions need to be partitioned without requiring cross-partition coordination. 
+* 写入吞吐量必须足够低才能在单个CPU核心上处理，否则事务需要进行分区而不需要跨分区协调。
 
-* Cross-partition transactions are possible, but there is a hard limit to the extent to which they can be used.
+* 跨分区的事务是可能的，但是对它们的使用程度有很大的限制。
