@@ -569,4 +569,82 @@ COMMIT;
 
 现在一个事务想要创建预订可以锁定期望的房间与时间段对应的表中的行。获取锁之后，可以如先前一样检查重叠的预订并插入一个新预订。值得注意的是没有用到额外的表来储存预订的信息——它只是一个集合的锁，用来防止并发修改时同时预订同一个房间以及时间段。
 
-这种方式叫做物化冲突，因为它把幻影变成了数据库中已存在的行集合上的锁冲突。然而不幸的是找出如何物化冲突是很难的也很容易出错，而让并发控制机制出现在应用程序数据模型中也是很难看的。由于这些原因，物化冲突淫荡被视为没有任何其它可替代项时的最后一搏。绝大多数场景下可串行化隔离级别都是更优先的选择。
+这种方式叫做物化冲突，因为它把幻影变成了数据库中已存在的行集合上的锁冲突。然而不幸的是找出如何物化冲突是很难的也很容易出错，而让并发控制机制出现在应用程序数据模型中也是很难看的。由于这些原因，物化冲突应当被视为没有任何其它可替代项时的最后一搏。绝大多数场景下可串行化隔离级别都是更优先的选择。
+
+## 可串行化
+
+在这一章中我们看到好几个容易导致竞争条件的事务的例子。一些竞争条件可以通过提交读和快照隔离级别防止，而其它的则不能。我们遇到了一些特别棘手的例子，有写偏和幻影。令人悲伤的是：
+
+* 隔离级别很难理解，并且不同的数据库实现不一致（比如，“可重复读”的含义彼此非常不同）。
+
+* 看看你的应用程序代码，很难讲在特定隔离级别执行时是否安全——在大型应用中尤其明显，你也许都没有注意到所有的事都在并发发生着。
+
+* 没有好的工具帮助我们检测竞争条件。原则上，静态分析可以有所帮助，但是研究性质的技术还没有找到实际应用的办法。测试并发问题也很难，因为它们通常是不确定的——问题只有在时机不对的时候才会发生。
+
+这可不是新问题——从1970年代开始，弱隔离级别刚刚引入的时候就是这样了。一直以来学者的答案都很简单：使用可序列化隔离。
+
+可序列化隔离常常被认为是最强的隔离级别。它保证即使事务并行执行，最终结果与没有任何并发地、顺序地、一次执行一个事务的结果是完全一致的。因此，数据库保证如果事务独立执行时表现正确，并发执行时依然是正确的——换句话说，数据库可以防止所有可能的竞争条件。
+
+但是如果可串行化隔离比其它弱隔离级别好那么多，那么为什么不是所有人都在用它呢？为了回答这个问题，我们需要看一下实现可串行化的选择，以及它们的表现如何。绝大多数提供可串行化的数据库使用下边三种技术之一，我们会在本章余下部分探索它们：
+
+* 如字面意思，顺序执行事务（见“实际的顺序执行”一节）
+
+* 两段锁（见“两段锁（2PL）”一节），几十年来它是唯一可行的选择。
+
+* 比如可串行化的快照隔离这样的乐观并发控制（见“可串行化的快照隔离（SSI）”）
+
+目前，我们主要基于单节点数据库的上下文讨论这些技术；在第九章我们将研究如何将它们推广到涉及分布式系统中多个节点的事务。
+
+### 实际的顺序执行
+
+避免并发问题最简单的方式就是完全放弃并发：在单线程上，以顺序的方式，一次只执行一个事务。通过这样做，我们完全回避了检测与防止事务间冲突的问题：由此产生的隔离按照定义是可序列化的。
+
+虽然这看起来是很明显的点子，但是数据库设计师直到最近——2007年左右——才认为单线程循环执行事务是可行的。如果在过去30年里多线程并发被认为是获得良好性能的基础的话，那事什么使得单线程执行成为可能呢？
+
+两个方面的发展引起了这样的反思：
+
+* RAM变得最够的便宜以至于现在在许多场景中把整个活跃数据库保存在内存中是可行的了（见“把所有东西放在内存中”一节）。当事务需要访问的数据都在内存中的时候，相比于必须等待数据从磁盘加载现在事务可以执行得更快了。
+
+* 数据库设计师意识到OLTP事务常常很短，且只发起很少量的读写请求（见“事务处理还是分析？”一节）。相比之下，长时间运行的分析查询通常是只读的，所以它们可以执行在一个一致性快照上（使用快照隔离）而不是串行的执行循环中。
+
+串行执行事务的方式在VoltDB/H-Store、Redis以及Datomic中实现了。为单线程执行设计的系统有的时候要比支持并发的系统性能要好，因为它避免了协调锁定的消耗。然而，它的吞吐量受到单个CPU核心的限制。为了最大限度地发挥单线程的能力，构造的事务与它们的传统形式稍稍有些差别。
+
+#### Encapsulating transactions in stored procedures
+
+In the early days of databases, the intention was that a database transaction could encompass an entire flow of user activity. For example, booking an airline ticket is a multi-stage process (searching for routes, fares, and available seats; deciding on an itinerary; booking seats on each of the flights of the itinerary; entering passenger details; making payment). Database designers thought that it would be neat if that entire process was one transaction so that it could be committed atomically. 
+
+Unfortunately, humans are very slow to make up their minds and respond. If a database transaction needs to wait for input from a user, the database needs to support a potentially huge number of concurrent transactions, most of them idle. Most databases cannot do that efficiently, and so almost all OLTP applications keep transactions short by avoiding interactively waiting for a user within a transaction. On the web, this means that a transaction is committed within the same HTTP request — a transaction does not span multiple requests. A new HTTP request starts a new transaction. 
+
+Even though the human has been taken out of the critical path, transactions have continued to be executed in an interactive client/ server style, one statement at a time. An application makes a query, reads the result, perhaps makes another query depending on the result of the first query, and so on. The queries and results are sent back and forth between the application code (running on one machine) and the database server (on another machine). 
+
+In this interactive style of transaction, a lot of time is spent in network communication between the application and the database. If you were to disallow concurrency in the database and only process one transaction at a time, the throughput would be dreadful because the database would spend most of its time waiting for the application to issue the next query for the current transaction. In this kind of database, it’s necessary to process multiple transactions concurrently in order to get reasonable performance. 
+
+For this reason, systems with single-threaded serial transaction processing don’t allow interactive multi-statement transactions. Instead, the application must submit the entire transaction code to the database ahead of time, as a stored procedure. The differences between these approaches is illustrated in Figure   7-9. Provided that all data required by a transaction is in memory, the stored procedure can execute very fast, without waiting for any network or disk I/ O.
+
+*Figure 7-9. The difference between an interactive transaction and a stored procedure (using the example transaction of Figure   7-8).*
+
+#### Pros and cons of stored procedures
+
+Stored procedures have existed for some time in relational databases, and they have been part of the SQL standard (SQL/ PSM) since 1999. They have gained a somewhat bad reputation, for various reasons: 
+
+* Each database vendor has its own language for stored procedures (Oracle has PL/ SQL, SQL Server has T-SQL, PostgreSQL has PL/ pgSQL, etc.). These languages haven’t kept up with developments in general-purpose programming languages, so they look quite ugly and archaic from today’s point of view, and they lack the ecosystem of libraries that you find with most programming languages. 
+
+* Code running in a database is difficult to manage: compared to an application server, it’s harder to debug, more awkward to keep in version control and deploy, trickier to test, and difficult to integrate with a metrics collection system for monitoring. 
+
+* A database is often much more performance-sensitive than an application server, because a single database instance is often shared by many application servers. A badly written stored procedure (e.g., using a lot of memory or CPU time) in a database can cause much more trouble than equivalent badly written code in an application server. 
+
+However, those issues can be overcome. Modern implementations of stored procedures have abandoned PL/ SQL and use existing general-purpose programming languages instead: VoltDB uses Java or Groovy, Datomic uses Java or Clojure, and Redis uses Lua. With stored procedures and in-memory data, executing all transactions on a single thread becomes feasible. As they don’t need to wait for I/ O and they avoid the overhead of other concurrency control mechanisms, they can achieve quite good throughput on a single thread. 
+
+VoltDB also uses stored procedures for replication: instead of copying a transaction’s writes from one node to another, it executes the same stored procedure on each replica. VoltDB therefore requires that stored procedures are deterministic (when run on different nodes, they must produce the same result). If a transaction needs to use the current date and time, for example, it must do so through special deterministic APIs.
+
+#### Summary of serial execution
+
+Serial execution of transactions has become a viable way of achieving serializable isolation within certain constraints: 
+
+* Every transaction must be small and fast, because it takes only one slow transaction to stall all transaction processing. 
+
+* It is limited to use cases where the active dataset can fit in memory. Rarely accessed data could potentially be moved to disk, but if it needed to be accessed in a single-threaded transaction, the system would get very slow.x 
+
+* Write throughput must be low enough to be handled on a single CPU core, or else transactions need to be partitioned without requiring cross-partition coordination. 
+
+* Cross-partition transactions are possible, but there is a hard limit to the extent to which they can be used.
