@@ -589,7 +589,7 @@ COMMIT;
 
 * 如字面意思，顺序执行事务（见“实际的顺序执行”一节）
 
-* 两阶段锁（见“两阶段锁（2PL）”一节），几十年来它是唯一可行的选择。
+* 二阶段锁定（见“二阶段锁定（2PL）”一节），几十年来它是唯一可行的选择。
 
 * 比如可串行化的快照隔离这样的乐观并发控制（见“可串行化的快照隔离（SSI）”）
 
@@ -649,71 +649,74 @@ VoltDB还把存储过程用于复制：不再把事务的写入请求从一个�
 
 * 跨分区的事务是可能的，但是对它们的使用程度有很大的限制。
 
-### 两阶段锁 (2PL)
+### 二阶段锁定 (2PL)
 
-在过去三十年里，在数据库中可串行化只有一种广泛使用的算法：两阶段锁。
+在过去三十年里，在数据库中可串行化只有一种广泛使用的算法：二阶段锁定。
 
 > **2PL不是2PC** 
 >
-> 值得注意的是虽然两阶段锁（2PL）听起来与两阶段提交很像，但是它们是完全不一样的东西。我们会在第九章讨论2PC。
+> 值得注意的是虽然二阶段锁定（2PL）听起来与两阶段提交很像，但是它们是完全不一样的东西。我们会在第九章讨论2PC。
 
 我们之前看到锁经常用来防止脏写（见“没有脏写”一节）：如果两个事务同时尝试写入同一个对象，锁保证第二个写者必须等待，直到第一个事务完成之后（中止了或者提交了）才能继续。
 
-两阶段锁与锁类似，但是使得锁定要求更强。只要没人尝试写入，好几个事务被允许并发读取同一个对象。但是一旦有人要写入（修改或是删除）对象，互斥性访问就是必须的：
+二阶段锁定与锁类似，但是使得锁定要求更强。只要没人尝试写入，好几个事务被允许并发读取同一个对象。但是一旦有人要写入（修改或是删除）对象，互斥性访问就是必须的：
 
 * 如果事务A读取对象而事务B要写入到那个对象，B必须等待直至A提交或者中止之后才可以继续。（这确保了B不能在A不知情地情况下意外地改变对象。）
 
 * 如果事务A写入了对象而事务B想要读取对象，B必须等待直至A提交或是中止之后才可以继续。（读取对象的旧值，如图7-1所示，在2PL下是无法接受的。）
 
-在2PL中，写者不只是阻塞其它写着；它们也阻塞读者，反之亦然。快照隔离中读者从不阻塞写着，而写者也从不阻塞读者（见“实现快照隔离”一节），这抓住了快照隔离与两阶段锁的核心差别。另一方面，因为2PL提供了可串行性，它保护事务免受所有之前讨论的竞争条件，包括丢失更新与写偏。
+在2PL中，写者不只是阻塞其它写着；它们也阻塞读者，反之亦然。快照隔离中读者从不阻塞写着，而写者也从不阻塞读者（见“实现快照隔离”一节），这抓住了快照隔离与二阶段锁定的核心差别。另一方面，因为2PL提供了可串行性，它保护事务免受所有之前讨论的竞争条件，包括丢失更新与写偏。
 
-#### Implementation of two-phase locking
+#### 二阶段锁定的实现
 
-2PL is used by the serializable isolation level in MySQL (InnoDB) and SQL Server, and the repeatable read isolation level in DB2 [23, 36]. 
+在MySQL(InnoDB)和SQL Server中2PL被用在可串行化隔离级别，而在DB2中被用在可重复读隔离级别。
 
-The blocking of readers and writers is implemented by a having a lock on each object in the database. The lock can either be in shared mode or in exclusive mode. The lock is used as follows: 
+读者与写者的阻塞是通过为数据库中每一个对象都有一个锁实现的。锁既可以在共享模式也可以在独占模式。锁的使用方式如下：
 
-* If a transaction wants to read an object, it must first acquire the lock in shared mode. Several transactions are allowed to hold the lock in shared mode simultaneously, but if another transaction already has an exclusive lock on the object, these transactions must wait. 
+* 如果事务要读取一个对象，它首先必须以共享模式获取锁。允许多个事务同时以共享模式占有锁，但是如果另一个事务已经独占锁定了对象，这些事务就必须等待。
 
-* If a transaction wants to write to an object, it must first acquire the lock in exclusive mode. No other transaction may hold the lock at the same time (either in shared or in exclusive mode), so if there is any existing lock on the object, the transaction must wait. 
+* 如果事务要写入一个对象，他首先必须以独占模式获取锁。任何其它事务都不能同时再占有这个锁（无论是以共享还是独占模式），所以如果对象上已经有了独占锁，事务就必须等待。
 
-* If a transaction first reads and then writes an object, it may upgrade its shared lock to an exclusive lock. The upgrade works the same as getting an exclusive lock directly. 
+* 如果事务首先读取然后写回对象，它需要把共享锁提升为互斥锁。升级的过程与直接获取一个互斥锁的过程是一样的。
 
-* After a transaction has acquired the lock, it must continue to hold the lock until the end of the transaction (commit or abort). This is where the name “two-phase” comes from: the first phase (while the transaction is executing) is when the locks are acquired, and the second phase (at the end of the transaction) is when all the locks are released. 
+* 当事务获取了锁之后，直到事务结束（提交或是中止）之前都必须持续占有锁。这就是“两阶段”名字的来历：第一阶段（在事务执行时）是获取了锁，而第二阶段（在事务结尾时）是在所有锁都被释放了的时候。
 
-Since so many locks are in use, it can happen quite easily that transaction A is stuck waiting for transaction B to release its lock, and vice versa. This situation is called deadlock. The database automatically detects deadlocks between transactions and aborts one of them so that the others can make progress. The aborted transaction needs to be retried by the application.
+由于用到了许多锁，就很容易出现事务A卡在等待事务B释放它的锁，反之亦然。这种情况叫做死锁。数据库自动检测事务之间的死锁并中止其中一个从而其它事务可以继续进行。被中止的事务需要应用程序来重试。
 
-#### Performance of two-phase locking
+#### 二阶段锁定的性能
 
-The big downside of two-phase locking, and the reason why it hasn’t been used by everybody since the 1970s, is performance: transaction throughput and response times of queries are significantly worse under two-phase locking than under weak isolation. 
+二阶段锁定的重大缺点，以及为什么自1970年起并不是每个人都在用的原因，是性能：事务吞吐量与查询的相应时间在二阶段锁定下比在弱隔离下明显更差。
 
-This is partly due to the overhead of acquiring and releasing all those locks, but more importantly due to reduced concurrency. By design, if two concurrent transactions try to do anything that may in any way result in a race condition, one has to wait for the other to complete. 
+原因部分由于获取与释放所有这些锁的消耗，但是更重要的是由于降低了并发性。根据设计，如果两个并发事务尝试做任何可能导致竞赛条件的事，其中一个都必须等待另外一个完成。
 
-Traditional relational databases don’t limit the duration of a transaction, because they are designed for interactive applications that wait for human input. Consequently, when one transaction has to wait on another, there is no limit on how long it may have to wait. Even if you make sure that you keep all your transactions short, a queue may form if several transactions want to access the same object, so a transaction may have to wait for several others to complete before it can do anything. 
+传统的关系型数据库不限制事务的耗时，因为它们是为可以等待用户输入的交互式应用设计的。因此，当一个事务必须等待另一个时，需要等待多长时间是没有限制的。即使你确定所有你的事务都很短，如果好几个事务需要访问同一个对象就会形成一个队列，所以事务在做任何事之前都必须等待好几个其它事务完成。
 
-For this reason, databases running 2PL can have quite unstable latencies, and they can be very slow at high percentiles (see “Describing Performance”) if there is contention in the workload. It may take just one slow transaction, or one transaction that accesses a lot of data and acquires many locks, to cause the rest of the system to grind to a halt. This instability is problematic when robust operation is required. 
+因为这个原因，执行2PL策略的数据库会有相当不稳定的延迟，并且如果工作负载中有竞争得话在高百分位时可以非常得慢（见“描述性能”一节）。只需要一个慢的事务，或者一个访问许多数据并获取许多锁的事务就可以导致系统的其余部分陷入停顿。当需要健壮的操作时，这种不稳定性就是有问题的。
 
-Although deadlocks can happen with the lock-based read committed isolation level, they occur much more frequently under 2PL serializable isolation (depending on the access patterns of your transaction). This can be an additional performance problem: when a transaction is aborted due to deadlock and is retried, it needs to do its work all over again. If deadlocks are frequent, this can mean significant wasted effort.
+虽然死锁也可以在基于锁的可提交读隔离级别发生，但是在2PL可串行化隔离中发生的频率更高（取决于事务的访问模式）。这是一个额外的性能问题：当事务由于死锁中止并重试的时候，就需要把它的工作全部重做一遍。如果死锁相当频繁，这意味着浪费了极大的处理能力。
 
-#### Predicate locks
+#### 断言锁
 
-In the preceding description of locks, we glossed over a subtle but important detail. In “Phantoms causing write skew” we discussed the problem of phantoms — that is, one transaction changing the results of another transaction’s search query. A database with serializable isolation must prevent phantoms. 
+在之前锁的描述中，我们忽略了一个细微但很重要的细节。在“幻影导致写偏”一节我们讨论了幻影的问题——即，一个事务影响了另一个事务搜索查询的结果。有着可串行化隔离的数据库必须防止这个问题。
 
-In the meeting room booking example this means that if one transaction has searched for existing bookings for a room within a certain time window (see Example   7-2), another transaction is not allowed to concurrently insert or update another booking for the same room and time range. (It’s okay to concurrently insert bookings for other rooms, or for the same room at a different time that doesn’t affect the proposed booking.) 
+在会议室预订示例中这意味着如果一个事务搜索某个时间段某个房间的已有预订记录（见示例7-2），那么就不允许另一个事务同时插入或者更新另一个订阅请求。（可以同时插入对其他房间的预订，或者在不影响当前预订的不同时间预订同一房间都是允许的。）
 
-How do we implement this? Conceptually, we need a predicate lock [3]. It works similarly to the shared/ exclusive lock described earlier, but rather than belonging to a particular object (e.g., one row in a table), it belongs to all objects that match some search condition, such as: 
+那我们如何实现它呢？在概念上，我们使用断言锁。它与之前描述的共享/独占锁的工作方式类似，但是相比于属于某个特定对象（比如，表中的一行），它属于符合某些搜索条件的所有对象，比如：
 
 ```SQL
-SELECT * FROM bookings WHERE room_id = 123 AND end_time > '2018-01-01 12: 00' AND start_time < '2018-01-01 13: 00';
+SELECT * FROM bookings
+  WHERE room_id = 123 AND
+    end_time > '2018-01-01 12: 00' AND
+    start_time < '2018-01-01 13: 00';
 ```
 
-A predicate lock restricts access as follows: 
+断言锁按下边这样限制访问：
 
-* If transaction A wants to read objects matching some condition, like in that SELECT query, it must acquire a shared-mode predicate lock on the conditions of the query. If another transaction B currently has an exclusive lock on any object matching those conditions, A must wait until B releases its lock before it is allowed to make its query. 
+* 如果事务A要读取符合某些条件的对象，就像`SELECT`查询，它必须获取查询条件的共享模式断言锁。如果另一个事务B同时在任何符合这些条件的对象上的互斥锁，A就必须要等待直到B释放这个锁，然后再进行它自己的查询。
 
-* If transaction A wants to insert, update, or delete any object, it must first check whether either the old or the new value matches any existing predicate lock. If there is a matching predicate lock held by transaction B, then A must wait until B has committed or aborted before it can continue. 
+* 如果事务A要插入、更新或者删除任何对象，它必须首先检查旧值或是新值是否与任何现有的断言锁相匹配。如果事务B占有匹配的断言锁，那么A就必须等待直至B提交或是中止之后才能继续。
 
-The key idea here is that a predicate lock applies even to objects that do not yet exist in the database, but which might be added in the future (phantoms). If two-phase locking includes predicate locks, the database prevents all forms of write skew and other race conditions, and so its isolation becomes serializable.
+这里的核心理念是断言锁的应用对还不存在于数据库中、但是未来可能被添加进来的（幻影）对象也有效。如果两阶段锁定包含断言锁，那么数据库可以防止所有形式的写偏以及其它竞争条件，而且这样隔离变成了可串行化的。
 
 #### Index-range locks
 
