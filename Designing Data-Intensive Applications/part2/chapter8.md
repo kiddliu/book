@@ -189,27 +189,27 @@
 
 更好的方案是，系统不使用配置好的常量超时时间，而是连续测量响应时间及其变化（抖动），并根据观察到的响应时间分布自动调整超时时间。这可以用Phi Accrual故障检测器完成，该检测器用在了Akka和Cassandra中。TCP重传超时也是以类似方式工作的。
 
-### Synchronous Versus Asynchronous Networks 
+### 同步 vs 异步网络
 
-Distributed systems would be a lot simpler if we could rely on the network to deliver packets with some fixed maximum delay, and not to drop packets. Why can’t we solve this at the hardware level and make the network reliable so that the software doesn’t need to worry about it? 
+如果我们可以依靠网络来传递具有固定最大延迟的数据包，也不会丢弃数据包，那么分布式系统就会简单得多。为什么我们不能在硬件级别解决这个问题使网络变得可靠，这样软件就不用担心网络了？
 
-To answer this question, it’s interesting to compare datacenter networks to the traditional fixed-line telephone network (non-cellular, non-VoIP), which is extremely reliable: delayed audio frames and dropped calls are very rare. A phone call requires a constantly low end-to-end latency and enough bandwidth to transfer the audio samples of your voice. Wouldn’t it be nice to have similar reliability and predictability in computer networks? 
+为了回答这个问题，将数据中心网络与非常可靠的传统固定电话网络（非蜂窝，非VoIP）进行比较是很有趣的：延迟音频帧和掉线都是非常罕见的。电话呼叫需要始终较低的端到端延迟以及足够的带宽来传输声音的音频样本。难道在计算机网络中具有类似的可靠性和可预测性不是很好吗？
 
-When you make a call over the telephone network, it establishes a circuit: a fixed, guaranteed amount of bandwidth is allocated for the call, along the entire route between the two callers. This circuit remains in place until the call ends [32]. For example, an ISDN network runs at a fixed rate of 4,000 frames per second. When a call is established, it is allocated 16 bits of space within each frame (in each direction). Thus, for the duration of the call, each side is guaranteed to be able to send exactly 16 bits of audio data every 250 microseconds [33, 34]. 
+当你通过电话网络拨打电话时，它会建立一线路：为呼叫分配了固定的有保证的带宽量，在两个呼叫者之间的整个线路上都是这样。线路始终存在直到通话结束。例如，ISDN网络以每秒4000帧的固定速率运行传输。呼叫建立后，每个帧内（每个方向）分配16位空间。因此在通话期间，每一方都保证能够每250微秒发送一个精确的16位音频数据。
 
-This kind of network is synchronous: even as data passes through several routers, it does not suffer from queueing, because the 16 bits of space for the call have already been reserved in the next hop of the network. And because there is no queueing, the maximum end-to-end latency of the network is fixed. We call this a bounded delay.
+这种网络是同步的：即使数据通过多个路由器，也不会受到排队的影响，因为呼叫的16位空间已经在网络的下一段中保留下来了。而且由于没有排队，网络中端到端的最大延迟是固定的。我们称之为有限的延迟。
 
-#### Can we not simply make network delays predictable? 
+#### 我们可不可以简单地使网络延迟变得可预测？
 
-Note that a circuit in a telephone network is very different from a TCP connection: a circuit is a fixed amount of reserved bandwidth which nobody else can use while the circuit is established, whereas the packets of a TCP connection opportunistically use whatever network bandwidth is available. You can give TCP a variable-sized block of data (e.g., an email or a web page), and it will try to transfer it in the shortest time possible. While a TCP connection is idle, it doesn’t use any bandwidth.ii 
+值得注意的是电话网络中线路与TCP连接有很大不同：线路是固定数量的预留带宽，线路建立时无人可以使用，而TCP连接的数据包有机会使用任何可用的网络带宽。你可以为TCP提供可变大小的数据块（例如电子邮件或网页），并且会尽可能在最短的时间内传输它。当TCP连接空闲时，它不使用任何带宽。
 
-If datacenter networks and the internet were circuit-switched networks, it would be possible to establish a guaranteed maximum round-trip time when a circuit was set up. However, they are not: Ethernet and IP are packet-switched protocols, which suffer from queueing and thus unbounded delays in the network. These protocols do not have the concept of a circuit. 
+如果数据中心网络和互联网是线路交换网络，那么建立线路时可以确保最大往返时间。 然而，它们并不是：以太网和IP是分组交换协议，它们受到排队的影响从而导致网络无限制的延迟。这些协议是没有线路概念的。
 
-Why do datacenter networks and the internet use packet switching? The answer is that they are optimized for bursty traffic. A circuit is good for an audio or video call, which needs to transfer a fairly constant number of bits per second for the duration of the call. On the other hand, requesting a web page, sending an email, or transferring a file doesn’t have any particular bandwidth requirement — we just want it to complete as quickly as possible. 
+为什么数据中心网络和互联网使用分组交换呢？ 答案是因为它们针对突发流量进行了优化。线路适用于音频或视频通话，它们需要在通话期间每秒传输相当恒定的比特数。另一方面，请求网页、发送电子邮件或传输文件没有任何特定的带宽要求——我们只是希望它尽快完成。
 
-If you wanted to transfer a file over a circuit, you would have to guess a bandwidth allocation. If you guess too low, the transfer is unnecessarily slow, leaving network capacity unused. If you guess too high, the circuit cannot be set up (because the network cannot allow a circuit to be created if its bandwidth allocation cannot be guaranteed). Thus, using circuits for bursty data transfers wastes network capacity and makes transfers unnecessarily slow. By contrast, TCP dynamically adapts the rate of data transfer to the available network capacity. 
+如果你想通过线路传输文件，你就必须猜测带宽的分配。如果你猜的太低，传输速度就会太慢，导致网络容量浪费了。如果你猜得太高，线路就无法建立（因为如果无法保证其带宽分配，网络不能建立线路）。因此，使用线路进行突发数据传输会浪费网络容量，并导致传输缓慢。相比之下，TCP会动态调整数据传输速率以适应可用的网络容量。
 
-There have been some attempts to build hybrid networks that support both circuit switching and packet switching, such as ATM.iii InfiniBand has some similarities [35]: it implements end-to-end flow control at the link layer, which reduces the need for queueing in the network, although it can still suffer from delays due to link congestion [36]. With careful use of quality of service (QoS, prioritization and scheduling of packets) and admission control (rate-limiting senders), it is possible to emulate circuit switching on packet networks, or provide statistically bounded delay [25, 32].
+已经有了一些构建同时支持电路交换和分组交换的混合网络的尝试，比如ATM。InfiniBand有一些相似之处：它在链路层实现了端到端的流量控制，这减少了在网络中排队的需要，尽管它仍然可能由于链路拥塞而遭受延迟。通过仔细使用服务质量（QoS，数据包的优先级和调度）和准入控制（对发送者限速），在分组网络上模仿线路交换是有可能的，提供统计上有界的延迟也是有可能的。
 
 > Latency and Resource Utilization
 >
