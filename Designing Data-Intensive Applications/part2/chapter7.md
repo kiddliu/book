@@ -718,23 +718,23 @@ SELECT * FROM bookings
 
 这里的核心理念是断言锁的应用对还不存在于数据库中、但是未来可能被添加进来的（幻影）对象也有效。如果两阶段锁定包含断言锁，那么数据库可以防止所有形式的写偏以及其它竞争条件，而且这样隔离变成了可串行化的。
 
-#### Index-range locks
+#### 索引范围锁定
 
-Unfortunately, predicate locks do not perform well: if there are many locks by active transactions, checking for matching locks becomes time-consuming. For that reason, most databases with 2PL actually implement index-range locking (also known as next-key locking), which is a simplified approximation of predicate locking [41, 50]. 
+然而，断言锁表现并不是很好：如果活跃事务产生了许多锁，检查匹配的锁会消耗很多时间。因此，大多数支持2PL的数据库实际上实现了索引范围锁定（也叫做下一键锁定），它是断言锁的一种简化近似。
 
-It’s safe to simplify a predicate by making it match a greater set of objects. For example, if you have a predicate lock for bookings of room 123 between noon and 1 p.m., you can approximate it by locking bookings for room 123 at any time, or you can approximate it by locking all rooms (not just room 123) between noon and 1 p.m. This is safe, because any write that matches the original predicate will definitely also match the approximations. 
+使断言匹配更大的数据集合从而简化它是安全的。举个例子，如果对房间123中午12点到下午1点的预订有一个断言锁，近似模拟它既可以锁定房间123任意时间上的预订，也可以锁定中午12点到下午1点之间所有的房间（而不只是房间123）。这样做是安全的，因为任何匹配最初断言的任何写入也一定会匹配这些近似模拟值。
 
-In the room bookings database you would probably have an index on the room_id column, and/ or indexes on start_time and end_time (otherwise the preceding query would be very slow on a large database): 
+在会议室预订数据库中你大概在列`room_id`上有索引，亦或者是在`start_time`和`end_time`列上（否则在大型数据库中之前的查询会非常慢）：
 
-* Say your index is on room_id, and the database uses this index to find existing bookings for room 123. Now the database can simply attach a shared lock to this index entry, indicating that a transaction has searched for bookings of room 123. 
+* 假设索引建立在`room_id`，数据库使用这个索引来查找房间123已有的预订记录。现在数据库只需要在这条索引记录上加共享锁，表明事务已经搜索了房间123的所有预订。
 
-* Alternatively, if the database uses a time-based index to find existing bookings, it can attach a shared lock to a range of values in that index, indicating that a transaction has searched for bookings that overlap with the time period of noon to 1 p.m. on January 1, 2018. 
+* 或者是，数据库使用基于时间的索引来查找已有的预订记录，他可以在索引的一些列值上加共享锁，表明事务已经搜索了覆盖2018年1月1日中午12点到下午1点时间段的所有预订。
 
-Either way, an approximation of the search condition is attached to one of the indexes. Now, if another transaction wants to insert, update, or delete a booking for the same room and/ or an overlapping time period, it will have to update the same part of the index. In the process of doing so, it will encounter the shared lock, and it will be forced to wait until the lock is released. 
+对于任何一种方式，搜索条件的一种近似表达被加到了其中的一个索引。现在，如果另一个事务要插入、更新或者删除对同一房间同一个时间段的预订，它需要更新索引的同一部分。在这样做的过程中，它会遇到共享锁，于是被强制等待这个锁的释放。
 
-This provides effective protection against phantoms and write skew. Index-range locks are not as precise as predicate locks would be (they may lock a bigger range of objects than is strictly necessary to maintain serializability), but since they have much lower overheads, they are a good compromise. 
+这样做针对幻影与写偏都提供了有效的保护。索引范围锁定虽然没有断言锁那样准确定位（它们会锁定更大范围的对象，而不是为了维持可串行化所严格必须的），但是由于它们只有很低的消耗，于是是很好的折中方案。
 
-If there is no suitable index where a range lock can be attached, the database can fall back to a shared lock on the entire table. This will not be good for performance, since it will stop all other transactions writing to the table, but it’s a safe fallback position.
+如果没有合适的的索引让范围锁加锁，数据库可以退而在整张表上加共享锁。这对性能来说不是很好，因为这样会阻止所有其它事务写入到表中，但是确实是一个安全的回退方案。
 
 ### 可串行化的快照隔离 （SSI）
 
