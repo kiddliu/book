@@ -211,11 +211,13 @@
 
 已经有了一些构建同时支持电路交换和分组交换的混合网络的尝试，比如ATM。InfiniBand有一些相似之处：它在链路层实现了端到端的流量控制，这减少了在网络中排队的需要，尽管它仍然可能由于链路拥塞而遭受延迟。通过仔细使用服务质量（QoS，数据包的优先级和调度）和准入控制（对发送者限速），在分组网络上模仿线路交换是有可能的，提供统计上有界的延迟也是有可能的。
 
-> Latency and Resource Utilization
+> 延迟和资源利用
 >
-> More generally, you can think of variable delays as a consequence of dynamic resource partitioning.
+> 更一般地说，你可以把可变延迟视为动态资源分区的结果。
 >
-> Say you have a wire between two telephone switches that can carry up to 10,000 simultaneous calls. Each circuit that is switched over this wire occupies one of those call slots. Thus, you can think of the wire as a resource that can be shared by up to 10,000 simultaneous users. The resource is divided up in a static way: even if you’re the only call on the wire right now, and all other 9,999 slots are unused, your circuit is still allocated the same fixed amount of bandwidth as when the wire is fully utilized.
+> 假设两台电话交换机之间有一条线路，可以同时进行10,000个呼叫。 通过此线路切换的每个电路都占用其中一个呼叫插槽。 因此，您可以将线路视为可由多达10,000个并发用户共享的资源。 资源以静态方式分配：即使您现在是电话上唯一的电话，并且所有其他9,999个插槽都未使用，您的电路仍将分配与导线充分利用时相同的固定数量的带宽。
+
+Say you have a wire between two telephone switches that can carry up to 10,000 simultaneous calls. Each circuit that is switched over this wire occupies one of those call slots. Thus, you can think of the wire as a resource that can be shared by up to 10,000 simultaneous users. The resource is divided up in a static way: even if you’re the only call on the wire right now, and all other 9,999 slots are unused, your circuit is still allocated the same fixed amount of bandwidth as when the wire is fully utilized.
 >
 > By contrast, the internet shares network bandwidth dynamically. Senders push and jostle with each other to get their packets over the wire as quickly as possible, and the network switches decide which packet to send (i.e., the bandwidth allocation) from one moment to the next. This approach has the downside of queueing, but the advantage is that it maximizes utilization of the wire. The wire has a fixed cost, so if you utilize it better, each byte you send over the wire is cheaper.
 >
