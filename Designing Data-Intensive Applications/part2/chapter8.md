@@ -227,51 +227,51 @@
 
 ## Unreliable Clocks
 
-Clocks and time are important. Applications depend on clocks in various ways to answer questions like the following: 
+时钟和时间很重要。应用程序以各种方式依赖时钟来回答类似下边的问题：
 
-1. Has this request timed out yet?
+1. 这个请求超时了吗？
 
-2. What’s the 99th percentile response time of this service?
+2. 服务第99百分位的响应时间是多少？
 
-3. How many queries per second did this service handle on average in the last five minutes?
+3. 在过去五分钟之内服务平均每秒处理了多少个查询？
 
-4. How long did the user spend on our site?
+4. 用户在我们的网站上停留了多长时间？
 
-5. When was this article published?
+5. 这篇文章是什么时侯发表的？
 
-6. At what date and time should the reminder email be sent?
+6. 在哪一天哪一个时间发送提醒邮件？
 
-7. When does this cache entry expire?
+7. 这个缓存条目什么时候过期？
 
-8. What is the timestamp on this error message in the log file?
+8. 日志文件中这个错误消息的时间戳是多少？
 
-Examples 1– 4 measure durations (e.g., the time interval between a request being sent and a response being received), whereas examples 5– 8 describe points in time (events that occur on a particular date, at a particular time).
+示例问题1到4测量的是持续时间（例如，正在发送的请求和正在接收的响应之间的时间间隔），而示例问题5到8描述的是时间点（在特定日期，特定时间发生的事件）。
 
-In a distributed system, time is a tricky business, because communication is not instantaneous: it takes time for a message to travel across the network from one machine to another. The time when a message is received is always later than the time when it is sent, but due to variable delays in the network, we don’t know how much later. This fact sometimes makes it difficult to determine the order in which things happened when multiple machines are involved.
+在分布式系统中，时间是一件棘手的事情，因为通信是不即时的：消息通过网络从一台设备传输到另一台设备需要时间。收到消息的时间总是晚于发送消息的时间，但由于网络中的可变延迟，我们不知道会晚多久。在涉及多台设备的时候，有时这会使得确定事情发生的顺序变得很困难。
 
-Moreover, each machine on the network has its own clock, which is an actual hardware device: usually a quartz crystal oscillator. These devices are not perfectly accurate, so each machine has its own notion of time, which may be slightly faster or slower than on other machines. It is possible to synchronize clocks to some degree: the most commonly used mechanism is the Network Time Protocol (NTP), which allows the computer clock to be adjusted according to the time reported by a group of servers [37]. The servers in turn get their time from a more accurate time source, such as a GPS receiver.
+此外，网络上的每台机器都有自己的时钟，这是一个实际的硬件设备：通常是个石英晶体振荡器。这些设备并不完全准确，因此每台机器都有自己的时间，可能会比其他机器稍快或更慢一些。一定程度上同步这些时钟是可能的：最常用的机制是网络时间协议（NTP），它允许根据一组服务器报告的时间来调整计算机时钟。这些服务器则从更精确的时间源，比如GPS接收机，获取时间。
 
-### Monotonic Versus Time-of-Day Clocks
+### 单调时钟 vs 现世时钟
 
-Modern computers have at least two different kinds of clocks: a time-of-day clock and a monotonic clock. Although they both measure time, it is important to distinguish the two, since they serve different purposes.
+现代计算机至少有两种不同的时钟：现世时钟和单调时钟。尽管它们都衡量时间，但是因为它们有不同的目的，所以区分这两者很重要。
 
-#### Time-of-day clocks
+#### 现世时钟
 
-A time-of-day clock does what you intuitively expect of a clock: it returns the current date and time according to some calendar (also known as wall-clock time). For example, clock_gettime( CLOCK_REALTIME) on Linuxv and System.currentTimeMillis() in Java return the number of seconds (or milliseconds) since the epoch: midnight UTC on January 1, 1970, according to the Gregorian calendar, not counting leap seconds. Some systems use other dates as their reference point.
+现世时钟是你直观地了解时钟的依据：它根据某个纪年法（也称为挂钟时间）返回当前日期和时间。 例如，Linux中的`clock_gettime(CLOCK_REALTIME)`以及Java中的`System.currentTimeMillis()`返回自公历1970年1月1日UTC时代以来的秒数（或毫秒），不包括闰秒。有些系统使用其他日期作为参考点。
 
-Time-of-day clocks are usually synchronized with NTP, which means that a timestamp from one machine (ideally) means the same as a timestamp on another machine. However, time-of-day clocks also have various oddities, as described in the next section. In particular, if the local clock is too far ahead of the NTP server, it may be forcibly reset and appear to jump back to a previous point in time. These jumps, as well as the fact that they often ignore leap seconds, make time-of-day clocks unsuitable for measuring elapsed time [38].
+现世时钟通常与NTP同步，这意味着来自一台机器的时间戳（在理想情况下）与另一台机器上的时间戳意义相同。但是，如下一节所述，现世时钟也具有各种各样的怪异特性。尤其是如果本地时钟时间在NTP服务器超前太多，它可能会被强制重置并显示跳回到先前的时间点。这些跳跃，以及它们经常忽略闰秒的事实，使得现世时钟并不适合用来测量消耗了的时间。
 
-Time-of-day clocks have also historically had quite a coarse-grained resolution, e.g., moving forward in steps of 10   ms on older Windows systems [39]. On recent systems, this is less of a problem.
+现世时钟还具有相当粗略的解析度，例如，在较早的Windows系统上是以10毫秒为单位前进的。在较新的系统中，这已经不是一个问题了。
 
-#### Monotonic clocks
+#### 单调时钟
 
-A monotonic clock is suitable for measuring a duration (time interval), such as a timeout or a service’s response time: clock_gettime( CLOCK_MONOTONIC) on Linux and System.nanoTime() in Java are monotonic clocks, for example. The name comes from the fact that they are guaranteed to always move forward (whereas a time-of-day clock may jump back in time). You can check the value of the monotonic clock at one point in time, do something, and then check the clock again at a later time. The difference between the two values tells you how much time elapsed between the two checks. However, the absolute value of the clock is meaningless: it might be the number of nanoseconds since the computer was started, or something similarly arbitrary. In particular, it makes no sense to compare monotonic clock values from two different computers, because they don’t mean the same thing.
+单调时钟适合用来测量持续时间（时间间隔），例如超时或者是服务的响应时间：举例来说Linux上的`clock_gettime(CLOCK_MONOTONIC)`和Java中的`System.nanoTime()`是单调时钟。 这个名字来源于他们保证总是前进的事实（而现世时钟可以在时间轴上回退）。您可以在某个时间点检查单调时钟的值，做一些事情，然后再次检查时钟。这两个值的差告诉你两次检查之间经过了多少时间。但是，时钟的绝对值是毫无意义的：它可能是计算机启动以来的纳秒数，或类似的任意值。特别是，比较来自两台不同计算机的单调时钟值是没有意义的，因为它们并不意味着同一件事。
 
-On a server with multiple CPU sockets, there may be a separate timer per CPU, which is not necessarily synchronized with other CPUs. Operating systems compensate for any discrepancy and try to present a monotonic view of the clock to application threads, even as they are scheduled across different CPUs. However, it is wise to take this guarantee of monotonicity with a pinch of salt [40].
+在具有多个CPU插槽的服务器上，每个CPU可能有一个单独的定时器，但它不一定与其他CPU同步。操作系统弥补了任何差异并尝试将时钟的单调视图呈现给应用程序线程，即使它们是在不同的CPU上进行调度的。然而，对单调性的保证持半信半疑的态度是明智的。
 
-NTP may adjust the frequency at which the monotonic clock moves forward (this is known as slewing the clock) if it detects that the computer’s local quartz is moving faster or slower than the NTP server. By default, NTP allows the clock rate to be speeded up or slowed down by up to 0.05%, but NTP cannot cause the monotonic clock to jump forward or backward. The resolution of monotonic clocks is usually quite good: on most systems they can measure time intervals in microseconds or less.
+如果检测到计算机的本地石英移动速度比NTP服务器移动速度更快或更慢，NTP则可以调整单调时钟向前移动的频率（这称为转动时钟）。 默认情况下，NTP允许时钟速率加快或减慢最多0.05％，但NTP不会导致单调时钟向前或向后跳转。单调时钟的解析度通常相当好：在大多数系统中，他们可以用几微秒或更短的单位测量时间间隔。
 
-In a distributed system, using a monotonic clock for measuring elapsed time (e.g., timeouts) is usually fine, because it doesn’t assume any synchronization between different nodes’ clocks and is not sensitive to slight inaccuracies of measurement.
+在分布式系统中，使用单调时钟来测量经过时间（例如，超时）通常是可以的，因为它不假定节点之间的会进行时钟同步，并且对测量的轻微不准确性不敏感。
 
 ### Clock Synchronization and Accuracy
 
