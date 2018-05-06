@@ -273,89 +273,169 @@
 
 在分布式系统中，使用单调时钟来测量经过时间（例如，超时）通常是可以的，因为它不假定节点之间的会进行时钟同步，并且对测量的轻微不准确性不敏感。
 
-### Clock Synchronization and Accuracy
+### 时钟同步与准确度
 
-Monotonic clocks don’t need synchronization, but time-of-day clocks need to be set according to an NTP server or other external time source in order to be useful. Unfortunately, our methods for getting a clock to tell the correct time aren’t nearly as reliable or accurate as you might hope — hardware clocks and NTP can be fickle beasts.
+单调时钟不需要同步，但需要根据NTP服务器或其他外部时间源设置现世时钟才使之有用。然而，我们让时钟报告正确时间的方法并不如你希望的那样可靠准确——硬件时钟和NTP变幻莫测。
 
-To give just a few examples:
+举几个例子：
 
-* The quartz clock in a computer is not very accurate: it drifts (runs faster or slower than it should). Clock drift varies depending on the temperature of the machine. Google assumes a clock drift of 200   ppm (parts per million) for its servers [41], which is equivalent to 6   ms drift for a clock that is resynchronized with a server every 30 seconds, or 17 seconds drift for a clock that is resynchronized once a day. This drift limits the best possible accuracy you can achieve, even if everything is working correctly.
+* 计算机中的石英钟不是很精确：它会漂移（运行的速度比设想的速度要么快要么慢）。时钟漂移的程度取决于机器的温度。谷歌假设其服务器的时钟漂移为200ppm（百万分之一），相当于每30秒钟与服务器重新同步的时钟的6毫秒漂移，或者每天重新同步时钟的17秒时间漂移。即使一切工作正常，这种漂移也会限制您可以达到的最佳可能精度。
 
-* If a computer’s clock differs too much from an NTP server, it may refuse to synchronize, or the local clock will be forcibly reset [37]. Any applications observing the time before and after this reset may see time go backward or suddenly jump forward.
+* 如果计算机的时间与NTP服务器的时间差别太大，服务器会拒绝同步，或者本地时钟将被强制重置。任何观察时间重置前后的应用程序可能会看到时间倒退或者是突然地跳跃前进。
 
-* If a node is accidentally firewalled off from NTP servers, the misconfiguration may go unnoticed for some time. Anecdotal evidence suggests that this does happen in practice.
+* 如果节点因为防火墙与NTP服务器意外隔开，错误的配置可能会在一段时间内不会被注意到。传闻证据表明在实践中这确实发生过。
 
-* NTP synchronization can only be as good as the network delay, so there is a limit to its accuracy when you’re on a congested network with variable packet delays. One experiment showed that a minimum error of 35   ms is achievable when synchronizing over the internet [42], though occasional spikes in network delay lead to errors of around a second. Depending on the configuration, large network delays can cause the NTP client to give up entirely.
+* NTP同步只能与网络延迟一致，所以当你处于拥有包延迟多变的拥塞网络中时，其精度会受到限制。一项实验表明，通过互联网进行同步时，35毫秒的最小误差是可以实现的，尽管网络延迟中偶尔会出现的峰值导致大约一秒的误差。根据配置的不同，较高的网络延迟会导致NTP客户端完全放弃同步。
 
-* Some NTP servers are wrong or misconfigured, reporting time that is off by hours [43, 44]. NTP clients are quite robust, because they query several servers and ignore outliers. Nevertheless, it’s somewhat worrying to bet the correctness of your systems on the time that you were told by a stranger on the internet.
+* 一些NTP服务器是错的或配置有问题，报告的时间偏差有几个小时之多。NTP客户端非常强大，它们会查询多个服务器并忽略异常值。尽管如此，在互联网上让陌生人告诉你时间来保证你的系统的正确性，让人总有点担心。
 
-* Leap seconds result in a minute that is 59 seconds or 61 seconds long, which messes up timing assumptions in systems that are not designed with leap seconds in mind [45]. The fact that leap seconds have crashed many large systems [38, 46] shows how easy it is for incorrect assumptions about clocks to sneak into a system. The best way of handling leap seconds may be to make NTP servers “lie,” by performing the leap second adjustment gradually over the course of a day (this is known as smearing) [47, 48], although actual NTP server behavior varies in practice [49].
+* 闰秒导致一分钟有59秒或者61秒长，这会使得那些没考虑闰秒的系统对时间的假设变得混乱。事实上闰秒曾经让许多大系统崩溃表明了对时钟的错误假设出现在系统里是多么的容易。处理闰秒的最佳方法是让NTP服务器“撒谎”，在一天中逐渐执行闰秒调整（这被称为拖尾），然而实践中NTP服务器的行为都很不一样。
 
-* In virtual machines, the hardware clock is virtualized, which raises additional challenges for applications that need accurate timekeeping [50]. When a CPU core is shared between virtual machines, each VM is paused for tens of milliseconds while another VM is running. From an application’s point of view, this pause manifests itself as the clock suddenly jumping forward [26].
+* 在虚拟机中，硬件时钟被虚拟化了，这对需要精确计时的应用程序提出了额外的挑战。当CPU核心在虚拟机之间共享时，当另一个虚拟机正在运行的时候每个虚拟会暂停数十个毫秒。从应用程序的角度看，这种暂停表现为时钟突然向前跳跃。
 
-* If you run software on devices that you don’t fully control (e.g., mobile or embedded devices), you probably cannot trust the device’s hardware clock at all. Some users deliberately set their hardware clock to an incorrect date and time, for example to circumvent timing limitations in games. As a result, the clock might be set to a time wildly in the past or the future.
+* 如果在不能完全控制的设备上运行软件（比如，移动设备或嵌入式设备），你大概根本无法信任设备的硬件时钟。一些用户故意把硬件时钟设置为不正确的日期和时间，比如为了规避游戏中的时间限制。因此，时钟可能会设置到很久之前的过去或是很久以后的未来。
 
-It is possible to achieve very good clock accuracy if you care about it sufficiently to invest significant resources. For example, the MiFID II draft European regulation for financial institutions requires all high-frequency trading funds to synchronize their clocks to within 100 microseconds of UTC, in order to help debug market anomalies such as “flash crashes” and to help detect market manipulation [51].
+如果足够关注时钟精度并愿意投入大量资源，实现非常好的时钟精度是由可能的。 例如，针对金融机构的欧盟法规MiFID II草案要求所有高频交易基金必须把它们的时钟与UTC时间同步在100微秒之内，从而协助诊断市场异常现象，比如“闪现崩溃”以及对市场的操纵。
 
-Such accuracy can be achieved using GPS receivers, the Precision Time Protocol (PTP) [52], and careful deployment and monitoring. However, it requires significant effort and expertise, and there are plenty of ways clock synchronization can go wrong. If your NTP daemon is misconfigured, or a firewall is blocking NTP traffic, the clock error due to drift can quickly become large.
+使用GPS接收机与精确时间协议（PTP），并且经过仔细的部署和监测就可以实现这种精确度。但是，这需要大量的努力和专业知识，并且时钟同步有许多种出错的方式。如果NTP守护进程配置错误，或者防火墙阻止NTP通信，由漂移引起的时间误差很快会变得变大。
 
-### Relying on Synchronized Clocks
+### 依赖于同步时钟
 
-The problem with clocks is that while they seem simple and easy to use, they have a surprising number of pitfalls: a day may not have exactly 86,400 seconds, time-of-day clocks may move backward in time, and the time on one node may be quite different from the time on another node.
+时钟的问题在于虽然它们看起来很简单，使用也很方便，但它们有着惊人数量的缺陷：一天可能不是精确的86400秒，现世时钟可能会向后偏移，而一个节点上的时间可能与另一个节点上的时间完全不同。
 
-Earlier in this chapter we discussed networks dropping and arbitrarily delaying packets. Even though networks are well behaved most of the time, software must be designed on the assumption that the network will occasionally be faulty, and the software must handle such faults gracefully. The same is true with clocks: although they work quite well most of the time, robust software needs to be prepared to deal with incorrect clocks.
+在本章早些时候，我们讨论了网络丢包和任意延迟数据包的问题。尽管网络在大多数情况下都表现良好，但软件在设计时必须假定网络偶尔会出故障，软件必须正常处理这些故障。时钟也是如此：虽然它们大多数时间都工作得很好，还是需要健壮的软件来处理不正确的时钟。
 
-Part of the problem is that incorrect clocks easily go unnoticed. If a machine’s CPU is defective or its network is misconfigured, it most likely won’t work at all, so it will quickly be noticed and fixed. On the other hand, if its quartz clock is defective or its NTP client is misconfigured, most things will seem to work fine, even though its clock gradually drifts further and further away from reality. If some piece of software is relying on an accurately synchronized clock, the result is more likely to be silent and subtle data loss than a dramatic crash [53, 54].
+问题的一部分在于不正确的时钟很容易被忽视。如果设备的CPU出现故障或者是网络配置错误，很可能设备根本无法工作，因此很快就会被注意到并被修复。另一方面，如果设备的石英时钟有缺陷或者NTP客户端配置错误，大多数情况下似乎都可以正常工作，然而它的时钟却渐渐地偏离现实。如果一些软件依赖于精确同步的时钟，结果更可能是静静地难以捉摸的数据丢失，而不是戏剧性地崩溃。
 
-Thus, if you use software that requires synchronized clocks, it is essential that you also carefully monitor the clock offsets between all the machines. Any node whose clock drifts too far from the others should be declared dead and removed from the cluster. Such monitoring ensures that you notice the broken clocks before they can cause too much damage.
+因此，如果您使用需要同步时钟的软件，则必须仔细监控所有机器之间的时钟偏移。任何时钟严重偏离其他节点的节点都应声明为失效并从群集中移除。这种监控可以确保在造成太大损失之前就注意到时钟已经坏了。
 
-#### Timestamps for ordering events
+#### 用来为事件排序的时间戳
 
-Let’s consider one particular situation in which it is tempting, but dangerous, to rely on clocks: ordering of events across multiple nodes. For example, if two clients write to a distributed database, who got there first? Which write is the more recent one?
+让我们考虑一个特定的情况，它对于时钟的依赖是诱人但却也危险的：跨越多个节点对事件进行排序。例如，如果两个客户端写入分布式数据库，谁先到达那里？哪一个是最新的？
 
-Figure   8-3 illustrates a dangerous use of time-of-day clocks in a database with multi-leader replication (the example is similar to Figure   5-9). Client A writes x   =   1 on node 1; the write is replicated to node 3; client B increments x on node 3 (we now have x   =   2); and finally, both writes are replicated to node 2.
+图8-3显示了在具有多主机复制的数据库中对现世时钟的一种危险应用（这个例子与图5-9里的类似）。客户端A在节点1上写入*x* = 1; 写入被复制到节点3; 客户端B在节点3上对*x*加一（我们现在有*x* = 2）; 最后，这两个写入都被复制到节点2。
 
-*Figure 8-3. The write by client B is causally later than the write by client A, but B’s write has an earlier timestamp.*
+*图8-3 客户端B的写入在因果关系上晚于客户端A的写入，但是B的写入的时间戳更早一些。*
 
-In Figure   8-3, when a write is replicated to other nodes, it is tagged with a timestamp according to the time-of-day clock on the node where the write originated. The clock synchronization is very good in this example: the skew between node 1 and node 3 is less than 3   ms, which is probably better than you can expect in practice. 
+在图8-3中，当写入被复制到其他节点时，它会根据发生写入的节点上的现世时钟时间标记时间戳。在这个例子中时钟同步非常好：节点1和节点3之间的偏差小于3毫秒，比实践中可预期的更好。
 
-Nevertheless, the timestamps in Figure   8-3 fail to order the events correctly: the write x   =   1 has a timestamp of 42.004 seconds, but the write x   =   2 has a timestamp of 42.003 seconds, even though x   =   2 occurred unambiguously later. When node 2 receives these two events, it will incorrectly conclude that x   =   1 is the more recent value and drop the write x   =   2. In effect, client B’s increment operation will be lost.
+然而图8-3中的时间戳无法正确排序事件：写入*x* = 1的时间戳为42.004秒，但写入*x* = 2的时间戳为42.003秒，即使*x* = 2明显是在稍后才发生的。当节点2收到这两个事件时，它会错误地推断出*x* = 1是更新的值而放弃写入*x* = 2。这样，客户端B的加一操作会丢失。
 
-This conflict resolution strategy is called last write wins (LWW), and it is widely used in both multi-leader replication and leaderless databases such as Cassandra [53] and Riak [54] (see “Last write wins (discarding concurrent writes)”). Some implementations generate timestamps on the client rather than the server, but this doesn’t change the fundamental problems with LWW:
+这种冲突解决策略被称为以最后一个写入为准（LWW），在多主机复制和无主机数据库，例如Cassandra和Riak中广泛使用（见“最后写入胜利（丢弃并发写入）”）。有些实现会在客户端而不是服务器上生成时间戳，但这不能改变LWW的本质问题：
 
-* Database writes can mysteriously disappear: a node with a lagging clock is unable to overwrite values previously written by a node with a fast clock until the clock skew between the nodes has elapsed [54, 55]. This scenario can cause arbitrary amounts of data to be silently dropped without any error being reported to the application.
+* 数据库写入可能会神秘地消失：时钟滞后的节点没有办法覆盖先前被时钟超前的节点写入的值，直至节点间的时钟偏差被消除。这种情况会导致无数的数据被悄悄丢弃，而不会向应用程序报告任何错误。
 
-* LWW cannot distinguish between writes that occurred sequentially in quick succession (in Figure   8-3, client B’s increment definitely occurs after client A’s write) and writes that were truly concurrent (neither writer was aware of the other). Additional causality tracking mechanisms, such as version vectors, are needed in order to prevent violations of causality (see “Detecting Concurrent Writes”).
-* It is possible for two nodes to independently generate writes with the same timestamp, especially when the clock only has millisecond resolution. An additional tiebreaker value (which can simply be a large random number) is required to resolve such conflicts, but this approach can also lead to violations of causality [53].
+* LWW无法区分连续快速的写入（在图8-3中，客户端B加一的动作必然发生在客户端A的写入之后）以及真正并发的写入（写入者彼此不知道对方）。为了防止破坏因果关系，需要使用额外的因果关系跟踪机制，例如版本向量（见“检测并发写入”一节）。
 
-Thus, even though it is tempting to resolve conflicts by keeping the most “recent” value and discarding others, it’s important to be aware that the definition of “recent” depends on a local time-of-day clock, which may well be incorrect. Even with tightly NTP-synchronized clocks, you could send a packet at timestamp 100   ms (according to the sender’s clock) and have it arrive at timestamp 99   ms (according to the recipient’s clock) — so it appears as though the packet arrived before it was sent, which is impossible.
+* 两个节点很可能独立地生成具有相同时间戳的写入，特别是当时钟仅具有毫秒级别解析度的时候。需要额外的决胜值（它可以只是一个大的随机数）来解决此类冲突，但这种方法也有可能导致违反因果关系。
 
-Could NTP synchronization be made accurate enough that such incorrect orderings cannot occur? Probably not, because NTP’s synchronization accuracy is itself limited by the network round-trip time, in addition to other sources of error such as quartz drift. For correct ordering, you would need the clock source to be significantly more accurate than the thing you are measuring (namely network delay).
+因此，尽管通过保留最“新”的值而舍弃其他值来解决冲突是很有诱惑力的，但重要的是要意识到“新”的定义取决于本地的现世时钟，这很可能是不正确的。即便有着与NTP紧密同步的时钟，你也有可能在时间戳为100毫秒时（根据发送者的时钟）发送一个数据包，并在时间戳为99毫秒时（根据接收者的时钟）接收到发送的数据包——因此看起来好像数据包在它发送之前就抵达了，这是不可能的。
 
-So-called logical clocks [56, 57], which are based on incrementing counters rather than an oscillating quartz crystal, are a safer alternative for ordering events (see “Detecting Concurrent Writes”). Logical clocks do not measure the time of day or the number of seconds elapsed, only the relative ordering of events (whether one event happened before or after another). In contrast, time-of-day and monotonic clocks, which measure actual elapsed time, are also known as physical clocks. We’ll look at ordering a bit more in “Ordering Guarantees”.
+NTP同步是否可以足够得准确以至于不会发生这种不正确的排序？可能不会，因为NTP同步精度本身受到网络往返时间的限制，还有石英漂移等其他误差源。为了正确的排序，你需要的时钟源要比你测量的要准确得多（即网络延迟）。
 
-Clock readings have a confidence interval
+基于增量计数器而不是振荡石英晶体的逻辑时钟，对于事件排序是种更安全的选择（见“检测并发写入”一节）。逻辑时钟不会测量一天中的时间或经过的秒数，而只会测量事件的相对顺序（无论一个事件发生在另一个事件之前还是之后）。相比之下，测量实际经过时间的现世时钟与单调时钟也被称为物理时钟。我们会在“顺序保证”一节中看看更多排序问题。
 
-You may be able to read a machine’s time-of-day clock with microsecond or even nanosecond resolution. But even if you can get such a fine-grained measurement, that doesn’t mean the value is actually accurate to such precision. In fact, it most likely is not — as mentioned previously, the drift in an imprecise quartz clock can easily be several milliseconds, even if you synchronize with an NTP server on the local network every minute. With an NTP server on the public internet, the best possible accuracy is probably to the tens of milliseconds, and the error may easily spike to over 100 ms when there is network congestion [57].
+#### Clock readings have a confidence interval
 
-Thus, it doesn’t make sense to think of a clock reading as a point in time — it is more like a range of times, within a confidence interval: for example, a system may be 95% confident that the time now is between 10.3 and 10.5 seconds past the minute, but it doesn’t know any more precisely than that [58]. If we only know the time +/–   100   ms, the microsecond digits in the timestamp are essentially meaningless.
+你可以以微秒或甚至纳秒的精度读取设备的现世时钟。但即使你可以得到如此细致的测量结果，这并不意味着这个值在这种精度上是实际精确的。事实上，它很可能不是——如之前所描述的，即使你每分钟都与本地网络上的NTP服务器同步，不精确的石英时钟导致的漂移也可能很容易达到几毫秒。对于公共互联网上的NTP服务器来说，最有可能达到的最佳精度大概是几十毫秒，而误差在网络拥塞时会轻松超过100毫秒。
 
-The uncertainty bound can be calculated based on your time source. If you have a GPS receiver or atomic (caesium) clock directly attached to your computer, the expected error range is reported by the manufacturer. If you’re getting the time from a server, the uncertainty is based on the expected quartz drift since your last sync with the server, plus the NTP server’s uncertainty, plus the network round-trip time to the server (to a first approximation, and assuming you trust the server).
+因此，将时钟读数视为一个时间点就没有意义了——它更像是一个时间范围，在一个置信区间内：例如，一个系统现在的时间介于10.3秒和10.5秒之间有95%的可信度，但它并没有比这更精确的信息了。如果我们只知道正负100毫秒界别的时间，那么时间戳中的微秒位数本质上就是没有意义了。
 
-Unfortunately, most systems don’t expose this uncertainty: for example, when you call clock_gettime(), the return value doesn’t tell you the expected error of the timestamp, so you don’t know if its confidence interval is five milliseconds or five years. An interesting exception is Google’s TrueTime API in Spanner [41], which explicitly reports the confidence interval on the local clock. When you ask it for the current time, you get back two values: [earliest, latest], which are the earliest possible and the latest possible timestamp. Based on its uncertainty calculations, the clock knows that the actual current time is somewhere within that interval. The width of the interval depends, among other things, on how long it has been since the local quartz clock was last synchronized with a more accurate clock source.
+不确定性的界限可以基于时间源进行计算。如果你的计算机上直接连接了GPS接收器或原子（铯）时钟，制造商会报告预期的误差范围。如果从服务器获取时间，则不确定性取决于自上次与服务器同步以来的预期石英漂移，再加上NTP服务器的不确定性以及到服务器的网络往返时间（第一次近似值，并假设你信任服务器）。
 
-#### Synchronized clocks for global snapshots
+然而大多数系统并没有暴露这种不确定性：例如，当您调用`clock_gettime()`时，返回值没有告诉你时间戳的预期误差，因此你不知道这个置信区间是五毫秒还是五年。一个有趣的例外是Spanner中的谷歌TrueTime API，它明确报告本地时钟的置信区间。当你请求当前时间时，你会得到两个值：*`[earlist, lastest]`*，这是最早可能的时间戳和最晚可能的时间戳。根据其不确定性计算，时钟知道实际当前时间在该时间间隔内。这个间隔的宽度取决于其他因素，尤其是本地的石英钟最后一次与更准确的时钟源同步之后过了多长时间。
 
-In “Snapshot Isolation and Repeatable Read” we discussed snapshot isolation, which is a very useful feature in databases that need to support both small, fast read-write transactions and large, long-running read-only transactions (e.g., for backups or analytics). It allows read-only transactions to see the database in a consistent state at a particular point in time, without locking and interfering with read-write transactions.
+#### 为全局快照使用的同步时钟
 
-The most common implementation of snapshot isolation requires a monotonically increasing transaction ID. If a write happened later than the snapshot (i.e., the write has a greater transaction ID than the snapshot), that write is invisible to the snapshot transaction. On a single-node database, a simple counter is sufficient for generating transaction IDs.
+在“快照隔离和可重复读取”一节中我们讨论了快照隔离，这是数据库中非常有用的功能，需要同时支持小型、快速读写事务和大型、长时间运行的只读事务（例如，用于备份或分析）。它使得只读事务可以看到在特定的时间点处于一致状态的数据库，而不会锁定数据库以及干扰其它读写事务。
 
-However, when a database is distributed across many machines, potentially in multiple datacenters, a global, monotonically increasing transaction ID (across all partitions) is difficult to generate, because it requires coordination. The transaction ID must reflect causality: if transaction B reads a value that was written by transaction A, then B must have a higher transaction ID than A — otherwise, the snapshot would not be consistent. With lots of small, rapid transactions, creating transaction IDs in a distributed system becomes an untenable bottleneck.vi
+快照隔离的最常见的实现需要一个单调递增的事务ID。如果写入发生的时间比快照晚（即，写入具有比快照更大的事务ID），那么写入对于快照事务是不可见的。在单节点数据库上，生成事务ID用简单的计数器就足够了。
 
-Can we use the timestamps from synchronized time-of-day clocks as transaction IDs? If we could get the synchronization good enough, they would have the right properties: later transactions have a higher timestamp. The problem, of course, is the uncertainty about clock accuracy.
+然而当数据库分布在多台设备上，很可能位于多个数据中心内时，一个全局的、单调递增的事务ID（跨所有分区）就很难生成了，因为它需要协调。事务ID必须反映因果关系：如果事务B读取了事务A写入的值，那么B必须具有比A更大的事务ID——否则，快照就会不一致了。对于大量小规模、快速的事务，在分布式系统中创建交易ID成为难以承受的瓶颈。
 
-Spanner implements snapshot isolation across datacenters in this way [59, 60]. It uses the clock’s confidence interval as reported by the TrueTime API, and is based on the following observation: if you have two confidence intervals, each consisting of an earliest and latest possible timestamp (A = [Aearliest, Alatest] and B = [Bearliest, Blatest]), and those two intervals do not overlap (i.e., Aearliest < Alatest < Bearliest < Blatest), then B definitely happened after A — there can be no doubt. Only if the intervals overlap are we unsure in which order A and B happened.
+我们可以使用同步之后的现世时钟时间戳作为事务ID吗？如果同步的结果足够好，他们将拥有正确的属性：后来的事务会有更大的时间戳。这个问题当然与时钟精度的不确定性有关。
 
-In order to ensure that transaction timestamps reflect causality, Spanner deliberately waits for the length of the confidence interval before committing a read-write transaction. By doing so, it ensures that any transaction that may read the data is at a sufficiently later time, so their confidence intervals do not overlap. In order to keep the wait time as short as possible, Spanner needs to keep the clock uncertainty as small as possible; for this purpose, Google deploys a GPS receiver or atomic clock in each datacenter, allowing clocks to be synchronized to within about 7   ms [41].
+Spanner就是用这种方式在数据中心之间实现了快照隔离。它使用了TrueTime API报告的时钟置信区间，并基于以下观察结果：如果您有两个置信区间，每个置信区间都包含可能的最早和最晚时间戳（*A* = [*A*<sub>earliest</sub>，*A*<sub>latest</sub>]和*B* = [*B*<sub>earliest</sub>，*B*<sub>latest</sub>]），如果这两个区间不重叠（即，*A*<sub>earliest</sub> < *A*<sub>latest</sub> < *B*<sub>earliest</sub> < *B*<sub>latest</sub>），那么B肯定发生在A之后——这是毫无疑问的。只有间隔重叠时，我们才无法确定A和B的发生顺序。
 
-Using clock synchronization for distributed transaction semantics is an area of active research [57, 61, 62]. These ideas are interesting, but they have not yet been implemented in mainstream databases outside of Google.
+为了确保事务时间戳可以反映因果关系，Spanner在提交读写事务之前有意等待置信区间长度的时间。这样做，它可以确保任何可能读取数据的事务处于足够晚的时间，所以它们的置信区间不会重叠。为了尽可能缩短等待时间，Spanner需要保持时钟的不确定性尽可能的小; 为此，谷歌在每个数据中心都部署了GPS接收器或原子钟，把时钟同步在大约7毫秒之内。
+
+为分布式事务语义使用时钟同步是一个活跃的研究领域。这些想法都很有趣，但是还没有在谷歌以外的主流数据库中实现。
+
+### Process Pauses
+
+Let’s consider another example of dangerous clock use in a distributed system. Say you have a database with a single leader per partition. Only the leader is allowed to accept writes. How does a node know that it is still leader (that it hasn’t been declared dead by the others), and that it may safely accept writes?
+
+One option is for the leader to obtain a lease from the other nodes, which is similar to a lock with a timeout [63]. Only one node can hold the lease at any one time — thus, when a node obtains a lease, it knows that it is the leader for some amount of time, until the lease expires. In order to remain leader, the node must periodically renew the lease before it expires. If the node fails, it stops renewing the lease, so another node can take over when it expires.
+
+You can imagine the request-handling loop looking something like this: 
+
+```JAVA
+while (true) {
+    request = getIncomingRequest();
+
+    // Ensure that the lease always has at least 10 seconds remaining 
+    if (lease.expiryTimeMillis - System.currentTimeMillis() < 10000) {
+        lease = lease.renew();
+    }
+
+    if (lease.isValid()) {
+        process( request);
+    }
+}
+```
+
+What’s wrong with this code? Firstly, it’s relying on synchronized clocks: the expiry time on the lease is set by a different machine (where the expiry may be calculated as the current time plus 30 seconds, for example), and it’s being compared to the local system clock. If the clocks are out of sync by more than a few seconds, this code will start doing strange things.
+
+Secondly, even if we change the protocol to only use the local monotonic clock, there is another problem: the code assumes that very little time passes between the point that it checks the time (System.currentTimeMillis()) and the time when the request is processed (process( request)). Normally this code runs very quickly, so the 10 second buffer is more than enough to ensure that the lease doesn’t expire in the middle of processing a request.
+
+However, what if there is an unexpected pause in the execution of the program? For example, imagine the thread stops for 15 seconds around the line lease.isValid() before finally continuing. In that case, it’s likely that the lease will have expired by the time the request is processed, and another node has already taken over as leader. However, there is nothing to tell this thread that it was paused for so long, so this code won’t notice that the lease has expired until the next iteration of the loop — by which time it may have already done something unsafe by processing the request.
+
+Is it crazy to assume that a thread might be paused for so long? Unfortunately not. There are various reasons why this could happen:
+
+* Many programming language runtimes (such as the Java Virtual Machine) have a garbage collector (GC) that occasionally needs to stop all running threads. These “stop-the-world” GC pauses have sometimes been known to last for several minutes [64]! Even so-called “concurrent” garbage collectors like the HotSpot JVM’s CMS cannot fully run in parallel with the application code — even they need to stop the world from time to time [65]. Although the pauses can often be reduced by changing allocation patterns or tuning GC settings [66], we must assume the worst if we want to offer robust guarantees.
+
+* In virtualized environments, a virtual machine can be suspended (pausing the execution of all processes and saving the contents of memory to disk) and resumed (restoring the contents of memory and continuing execution). This pause can occur at any time in a process’s execution and can last for an arbitrary length of time. This feature is sometimes used for live migration of virtual machines from one host to another without a reboot, in which case the length of the pause depends on the rate at which processes are writing to memory [67].
+
+* On end-user devices such as laptops, execution may also be suspended and resumed arbitrarily, e.g., when the user closes the lid of their laptop.
+
+* When the operating system context-switches to another thread, or when the hypervisor switches to a different virtual machine (when running in a virtual machine), the currently running thread can be paused at any arbitrary point in the code. In the case of a virtual machine, the CPU time spent in other virtual machines is known as steal time. If the machine is under heavy load — i.e., if there is a long queue of threads waiting to run — it may take some time before the paused thread gets to run again.
+
+* If the application performs synchronous disk access, a thread may be paused waiting for a slow disk I/ O operation to complete [68]. In many languages, disk access can happen surprisingly, even if the code doesn’t explicitly mention file access — for example, the Java classloader lazily loads class files when they are first used, which could happen at any time in the program execution. I/ O pauses and GC pauses may even conspire to combine their delays [69]. If the disk is actually a network filesystem or network block device (such as Amazon’s EBS), the I/ O latency is further subject to the variability of network delays [29].
+
+* If the operating system is configured to allow swapping to disk (paging), a simple memory access may result in a page fault that requires a page from disk to be loaded into memory. The thread is paused while this slow I/ O operation takes place. If memory pressure is high, this may in turn require a different page to be swapped out to disk. In extreme circumstances, the operating system may spend most of its time swapping pages in and out of memory and getting little actual work done (this is known as thrashing). To avoid this problem, paging is often disabled on server machines (if you would rather kill a process to free up memory than risk thrashing).
+
+* A Unix process can be paused by sending it the SIGSTOP signal, for example by pressing Ctrl-Z in a shell. This signal immediately stops the process from getting any more CPU cycles until it is resumed with SIGCONT, at which point it continues running where it left off. Even if your environment does not normally use SIGSTOP, it might be sent accidentally by an operations engineer.
+
+All of these occurrences can preempt the running thread at any point and resume it at some later time, without the thread even noticing. The problem is similar to making multi-threaded code on a single machine thread-safe: you can’t assume anything about timing, because arbitrary context switches and parallelism may occur.
+
+When writing multi-threaded code on a single machine, we have fairly good tools for making it thread-safe: mutexes, semaphores, atomic counters, lock-free data structures, blocking queues, and so on. Unfortunately, these tools don’t directly translate to distributed systems, because a distributed system has no shared memory — only messages sent over an unreliable network.
+
+A node in a distributed system must assume that its execution can be paused for a significant length of time at any point, even in the middle of a function. During the pause, the rest of the world keeps moving and may even declare the paused node dead because it’s not responding. Eventually, the paused node may continue running, without even noticing that it was asleep until it checks its clock sometime later.
+
+#### Response time guarantees
+
+In many programming languages and operating systems, threads and processes may pause for an unbounded amount of time, as discussed. Those reasons for pausing can be eliminated if you try hard enough. 
+
+Some software runs in environments where a failure to respond within a specified time can cause serious damage: computers that control aircraft, rockets, robots, cars, and other physical objects must respond quickly and predictably to their sensor inputs. In these systems, there is a specified deadline by which the software must respond; if it doesn’t meet the deadline, that may cause a failure of the entire system. These are so-called hard real-time systems.
+
+> Is real-time really real?
+>
+> In embedded systems, real-time means that a system is carefully designed and tested to meet specified timing guarantees in all circumstances. This meaning is in contrast to the more vague use of the term real-time on the web, where it describes servers pushing data to clients and stream processing without hard response time constraints (see Chapter   11).
+
+For example, if your car’s onboard sensors detect that you are currently experiencing a crash, you wouldn’t want the release of the airbag to be delayed due to an inopportune GC pause in the airbag release system.
+
+Providing real-time guarantees in a system requires support from all levels of the software stack: a real-time operating system (RTOS) that allows processes to be scheduled with a guaranteed allocation of CPU time in specified intervals is needed; library functions must document their worst-case execution times; dynamic memory allocation may be restricted or disallowed entirely (real-time garbage collectors exist, but the application must still ensure that it doesn’t give the GC too much work to do); and an enormous amount of testing and measurement must be done to ensure that guarantees are being met.
+
+All of this requires a large amount of additional work and severely restricts the range of programming languages, libraries, and tools that can be used (since most languages and tools do not provide real-time guarantees). For these reasons, developing real-time systems is very expensive, and they are most commonly used in safety-critical embedded devices. Moreover, “real-time” is not the same as “high-performance” — in fact, real-time systems may have lower throughput, since they have to prioritize timely responses above all else (see also “Latency and Resource Utilization”).
+
+For most server-side data processing systems, real-time guarantees are simply not economical or appropriate. Consequently, these systems must suffer the pauses and clock instability that come from operating in a non-real-time environment.
+
+#### Limiting the impact of garbage collection
+
+The negative effects of process pauses can be mitigated without resorting to expensive real-time scheduling guarantees. Language runtimes have some flexibility around when they schedule garbage collections, because they can track the rate of object allocation and the remaining free memory over time.
+
+An emerging idea is to treat GC pauses like brief planned outages of a node, and to let other nodes handle requests from clients while one node is collecting its garbage. If the runtime can warn the application that a node soon requires a GC pause, the application can stop sending new requests to that node, wait for it to finish processing outstanding requests, and then perform the GC while no requests are in progress. This trick hides GC pauses from clients and reduces the high percentiles of response time [70, 71]. Some latency-sensitive financial trading systems [72] use this approach.
+
+A variant of this idea is to use the garbage collector only for short-lived objects (which are fast to collect) and to restart processes periodically, before they accumulate enough long-lived objects to require a full GC of long-lived objects [65, 73]. One node can be restarted at a time, and traffic can be shifted away from the node before the planned restart, like in a rolling upgrade (see Chapter   4).
+
+These measures cannot fully prevent garbage collection pauses, but they can usefully reduce their impact on the application.
