@@ -388,31 +388,29 @@ while (true) {
 
 其次，即使我们更改协议，只使用本地单调时钟，那也存在另一个问题：代码假设从检查时间（`System.currentTimeMillis()`）到请求被处理（`process(request)`），这中间只花去了很短的时间。 通常这段代码运行速度非常快，所以10秒缓冲区足以确保租期在处理请求的过程中不会过期。
 
-Secondly, even if we change the protocol to only use the local monotonic clock, there is another problem: the code assumes that very little time passes between the point that it checks the time (System.currentTimeMillis()) and the time when the request is processed (process( request)). Normally this code runs very quickly, so the 10 second buffer is more than enough to ensure that the lease doesn’t expire in the middle of processing a request.
+然而，如果在执行程序时出现意外停顿该怎么办？例如，假设线程在`lease.isValid()`这一行周围停止15秒然后才终于继续执行。在这种情况下，很可能在处理请求时租约已经过期，而另一个节点已经接管为领导者。 然而，没有什么可以告诉这个线程它已经暂停了这么久了，所以这段代码直到循环的下一次迭代之前都不会注意到租约已经过期——这时通过处理请求它可能已经做了一些不安全的事。
 
-However, what if there is an unexpected pause in the execution of the program? For example, imagine the thread stops for 15 seconds around the line lease.isValid() before finally continuing. In that case, it’s likely that the lease will have expired by the time the request is processed, and another node has already taken over as leader. However, there is nothing to tell this thread that it was paused for so long, so this code won’t notice that the lease has expired until the next iteration of the loop — by which time it may have already done something unsafe by processing the request.
+假设某个线程可能会暂停很长时间是疯了吗？然而并不是。它可能发生的原因有很多种：
 
-Is it crazy to assume that a thread might be paused for so long? Unfortunately not. There are various reasons why this could happen:
+* 许多编程语言运行时（比如Java虚拟机）都有一个垃圾回收器（GC），它偶尔需要停止所有正在运行的线程。这些“停止一切”的GC暂停有时会持续几分钟！即使像HotSpot JVM中CMS那样的所谓的“并发”垃圾回收器也不能完全与应用程序代码并行运行——即使它们需要时不时地停止所有事。尽管通常可以通过改变分配模式或调整GC设置来减少暂停，但如果我们想要提供健壮性保证，就必须假设最差的场景。
 
-* Many programming language runtimes (such as the Java Virtual Machine) have a garbage collector (GC) that occasionally needs to stop all running threads. These “stop-the-world” GC pauses have sometimes been known to last for several minutes [64]! Even so-called “concurrent” garbage collectors like the HotSpot JVM’s CMS cannot fully run in parallel with the application code — even they need to stop the world from time to time [65]. Although the pauses can often be reduced by changing allocation patterns or tuning GC settings [66], we must assume the worst if we want to offer robust guarantees.
+* 在虚拟化环境中，虚拟机可以被暂停（暂停执行所有进程并将内存内容保存到磁盘）然后被恢复（恢复内存内容并继续执行）。这个暂停可以发生在进程执行的任何时间，并且可以持续任意长度的时间。这个功能有时用于将虚拟机从一台主机实时迁移到另一台主机而无需重新启动，在这种情况下，暂停的长度取决于进程写入内存的速率。
 
-* In virtualized environments, a virtual machine can be suspended (pausing the execution of all processes and saving the contents of memory to disk) and resumed (restoring the contents of memory and continuing execution). This pause can occur at any time in a process’s execution and can last for an arbitrary length of time. This feature is sometimes used for live migration of virtual machines from one host to another without a reboot, in which case the length of the pause depends on the rate at which processes are writing to memory [67].
+* 在类似笔记本电脑的终端用户设备上，执行也会被任意地暂停和恢复，例如，当用户合上他们的笔记本电脑的盖子时。
 
-* On end-user devices such as laptops, execution may also be suspended and resumed arbitrarily, e.g., when the user closes the lid of their laptop.
+* 当操作系统上下文切换到另一个线程时，或者当管理程序切换到其他虚拟机时（在虚拟机中运行时），当前正在运行的线程可以在代码中的任意点暂停。在虚拟机的情况下，在其他虚拟机中花费的CPU时间被称为窃取时间。如果机器负载很重——即，如果有很长的线程队列等待运行——可能需要一些时间才能使暂停的线程再次运行。
 
-* When the operating system context-switches to another thread, or when the hypervisor switches to a different virtual machine (when running in a virtual machine), the currently running thread can be paused at any arbitrary point in the code. In the case of a virtual machine, the CPU time spent in other virtual machines is known as steal time. If the machine is under heavy load — i.e., if there is a long queue of threads waiting to run — it may take some time before the paused thread gets to run again.
+* 如果应用程序执行同步的磁盘访问，则线程可能会暂停而等待慢速磁盘I/O操作完成。在许多语言中，即使代码没有明确提到文件访问，磁盘访问也会出人意料地发生——例如，Java类加载器会延迟加载类文件，直至类第一次被使用到的时候，而这可能会在程序执行过程中任意时刻发生。I/O暂停和GC暂停甚至可能同时发生从而它们的延迟结合到了一起。如果磁盘实际上是一个网络文件系统或网络块设备（比如亚马逊的EBS），那么I/O延迟还会进一步受到网络延迟变化的影响。
 
-* If the application performs synchronous disk access, a thread may be paused waiting for a slow disk I/ O operation to complete [68]. In many languages, disk access can happen surprisingly, even if the code doesn’t explicitly mention file access — for example, the Java classloader lazily loads class files when they are first used, which could happen at any time in the program execution. I/ O pauses and GC pauses may even conspire to combine their delays [69]. If the disk is actually a network filesystem or network block device (such as Amazon’s EBS), the I/ O latency is further subject to the variability of network delays [29].
+* 如果操作系统被配置为允许内存交换到磁盘（分页），则简单的内存访问可能会导致页面错误，需要将磁盘中的页面加载到内存中。这个缓慢的I/O操作发生时线程被暂停了。如果内存压力很高，这可能又需要将另一个的页面换出到磁盘。在极端的情况下，操作系统可能会花费大部分时间将页面换入换出内存，从而只做了很少的实际工作（这被称为系统颠簸）。为了避免这个问题，通常在服务器机器上禁用分页（如果你宁愿杀死一个进程来释放内存，也不愿意系统颠簸）。
 
-* If the operating system is configured to allow swapping to disk (paging), a simple memory access may result in a page fault that requires a page from disk to be loaded into memory. The thread is paused while this slow I/ O operation takes place. If memory pressure is high, this may in turn require a different page to be swapped out to disk. In extreme circumstances, the operating system may spend most of its time swapping pages in and out of memory and getting little actual work done (this is known as thrashing). To avoid this problem, paging is often disabled on server machines (if you would rather kill a process to free up memory than risk thrashing).
+* 可以通过发送SIGSTOP信号来暂停Unix进程，例如通过在shell中按下Ctrl-Z。该信号立即停止进程，防止获得更多的CPU周期直到使用SIGCONT恢复它，此时它会继续从上一次暂停的地方执行。即使您的环境通常不使用SIGSTOP，也可能由运营工程师意外发送。
 
-* A Unix process can be paused by sending it the SIGSTOP signal, for example by pressing Ctrl-Z in a shell. This signal immediately stops the process from getting any more CPU cycles until it is resumed with SIGCONT, at which point it continues running where it left off. Even if your environment does not normally use SIGSTOP, it might be sent accidentally by an operations engineer.
+所有这些事件都可以在任何时候抢占正在运行的线程，并在稍后继续运行，而线程甚至不会注意到它。这个问题类似于使多线程代码在单个机器上线程安全：你不能假定任何关于时序的事情，因为会发生任意的上下文切换和并行计算。
 
-All of these occurrences can preempt the running thread at any point and resume it at some later time, without the thread even noticing. The problem is similar to making multi-threaded code on a single machine thread-safe: you can’t assume anything about timing, because arbitrary context switches and parallelism may occur.
+在单个机器上编写多线程代码时，我们有相当不错的工具来实现线程安全：互斥量，信号量，原子计数器，无锁数据结构，阻塞队列等等。然而，这些工具不能直接用于分布式系统，因为分布式系统没有共享内存——只有通过不可靠网络发送的消息。
 
-When writing multi-threaded code on a single machine, we have fairly good tools for making it thread-safe: mutexes, semaphores, atomic counters, lock-free data structures, blocking queues, and so on. Unfortunately, these tools don’t directly translate to distributed systems, because a distributed system has no shared memory — only messages sent over an unreliable network.
-
-A node in a distributed system must assume that its execution can be paused for a significant length of time at any point, even in the middle of a function. During the pause, the rest of the world keeps moving and may even declare the paused node dead because it’s not responding. Eventually, the paused node may continue running, without even noticing that it was asleep until it checks its clock sometime later.
+分布式系统中的节点必须假定它的执行过程可以在任何时刻暂停很长一段时间，即使在函数中间也是如此。 在暂停期间，其他系统一直在执行，甚至可能因为没有响应而宣布已暂停的节点失效。最终，暂停的节点可能会继续运行，甚至没有注意到之前一直处于睡眠状态，直到后来检查时钟的时候。
 
 #### Response time guarantees
 
