@@ -335,7 +335,7 @@ NTP同步是否可以足够得准确以至于不会发生这种不正确的排�
 
 基于增量计数器而不是振荡石英晶体的逻辑时钟，对于事件排序是种更安全的选择（见“检测并发写入”一节）。逻辑时钟不会测量一天中的时间或经过的秒数，而只会测量事件的相对顺序（无论一个事件发生在另一个事件之前还是之后）。相比之下，测量实际经过时间的现世时钟与单调时钟也被称为物理时钟。我们会在“顺序保证”一节中看看更多排序问题。
 
-#### Clock readings have a confidence interval
+#### 时钟读数是有置信区间的
 
 你可以以微秒或甚至纳秒的精度读取设备的现世时钟。但即使你可以得到如此细致的测量结果，这并不意味着这个值在这种精度上是实际精确的。事实上，它很可能不是——如之前所描述的，即使你每分钟都与本地网络上的NTP服务器同步，不精确的石英时钟导致的漂移也可能很容易达到几毫秒。对于公共互联网上的NTP服务器来说，最有可能达到的最佳精度大概是几十毫秒，而误差在网络拥塞时会轻松超过100毫秒。
 
@@ -361,30 +361,32 @@ Spanner就是用这种方式在数据中心之间实现了快照隔离。它使�
 
 为分布式事务语义使用时钟同步是一个活跃的研究领域。这些想法都很有趣，但是还没有在谷歌以外的主流数据库中实现。
 
-### Process Pauses
+### 进程暂停
 
-Let’s consider another example of dangerous clock use in a distributed system. Say you have a database with a single leader per partition. Only the leader is allowed to accept writes. How does a node know that it is still leader (that it hasn’t been declared dead by the others), and that it may safely accept writes?
+让我们考虑另一个在分布式系统中危险地使用时钟的例子。假设你有一个数据库，每个分区只有一个主机。只允许主机接受写入。一个节点如何知道它仍然是主机（也就是它还没有被别人宣布失效），于是可以安全地接受写入？
 
-One option is for the leader to obtain a lease from the other nodes, which is similar to a lock with a timeout [63]. Only one node can hold the lease at any one time — thus, when a node obtains a lease, it knows that it is the leader for some amount of time, until the lease expires. In order to remain leader, the node must periodically renew the lease before it expires. If the node fails, it stops renewing the lease, so another node can take over when it expires.
+一种选择是让主机从其他节点获取租约，就好像有超时限制的锁。任意一个时刻只有一个节点可以占有租约——因此，当节点获得租约时，它知道某段时间内它是主机，直到租约到期。为了保持主机地位，节点必须在到期前定期更新租约。如果节点失效，它将停止续租，于是另外一个节点在到期以后就可以接管。
 
-You can imagine the request-handling loop looking something like this: 
+可以想象请求处理循环看起来大概是这样的：
 
 ```JAVA
 while (true) {
     request = getIncomingRequest();
 
     // Ensure that the lease always has at least 10 seconds remaining 
-    if (lease.expiryTimeMillis - System.currentTimeMillis() < 10000) {
+    if (lease.expiryTimeMillis - System.currentTimeMillis() < 10000 ) {
         lease = lease.renew();
     }
 
     if (lease.isValid()) {
-        process( request);
+        process(request);
     }
 }
 ```
 
-What’s wrong with this code? Firstly, it’s relying on synchronized clocks: the expiry time on the lease is set by a different machine (where the expiry may be calculated as the current time plus 30 seconds, for example), and it’s being compared to the local system clock. If the clocks are out of sync by more than a few seconds, this code will start doing strange things.
+这段代码有什么问题？首先，它依赖于同步了的时钟：租约的失效时间由另一台机器设置的（例如，可以按照当前时间加上30秒计算出到期时间），而且它会与本地的系统时钟进行比较。如果时钟不同步的程度超过了好几秒钟，这段代码将开始执行奇怪的事情。
+
+其次，即使我们更改协议，只使用本地单调时钟，那也存在另一个问题：代码假设从检查时间（`System.currentTimeMillis()`）到请求被处理（`process(request)`），这中间只花去了很短的时间。 通常这段代码运行速度非常快，所以10秒缓冲区足以确保租期在处理请求的过程中不会过期。
 
 Secondly, even if we change the protocol to only use the local monotonic clock, there is another problem: the code assumes that very little time passes between the point that it checks the time (System.currentTimeMillis()) and the time when the request is processed (process( request)). Normally this code runs very quickly, so the 10 second buffer is more than enough to ensure that the lease doesn’t expire in the middle of processing a request.
 
