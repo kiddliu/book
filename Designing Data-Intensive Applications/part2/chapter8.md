@@ -412,30 +412,30 @@ while (true) {
 
 分布式系统中的节点必须假定它的执行过程可以在任何时刻暂停很长一段时间，即使在函数中间也是如此。 在暂停期间，其他系统一直在执行，甚至可能因为没有响应而宣布已暂停的节点失效。最终，暂停的节点可能会继续运行，甚至没有注意到之前一直处于睡眠状态，直到后来检查时钟的时候。
 
-#### Response time guarantees
+#### 相应时间保证
 
-In many programming languages and operating systems, threads and processes may pause for an unbounded amount of time, as discussed. Those reasons for pausing can be eliminated if you try hard enough. 
+在许多编程语言与操作系统中，我们讨论过，线程与进程可能暂停无限长的时间。如果足够努力，这些导致暂停的原因都可以消除。
 
-Some software runs in environments where a failure to respond within a specified time can cause serious damage: computers that control aircraft, rockets, robots, cars, and other physical objects must respond quickly and predictably to their sensor inputs. In these systems, there is a specified deadline by which the software must respond; if it doesn’t meet the deadline, that may cause a failure of the entire system. These are so-called hard real-time systems.
+一些软件运行在指定时间内未能响应可能导致严重后果的环境中：控制飞机，火箭，机器人，汽车和其他物体的计算机必须对其传感器输入做出快速和可预测的响应。在这些系统中，软件必须在特定期限之前响应；如果超出了期限，可能会导致整个系统的故障。这些都是所谓的硬实时系统。
 
-> Is real-time really real?
+> 实时是真的么？
 >
-> In embedded systems, real-time means that a system is carefully designed and tested to meet specified timing guarantees in all circumstances. This meaning is in contrast to the more vague use of the term real-time on the web, where it describes servers pushing data to clients and stream processing without hard response time constraints (see Chapter   11).
+> 在嵌入式系统中，实时意味着系统是经过仔细设计和测试的以满足所有场景下对时间的特定保证。这个含义与Web上实时术语的模糊使用相反，它描述了服务器将数据推送到客户端以及流处理而没有严格的响应时间限制（见第11章）。
 
-For example, if your car’s onboard sensors detect that you are currently experiencing a crash, you wouldn’t want the release of the airbag to be delayed due to an inopportune GC pause in the airbag release system.
+例如，如果汽车车载传感器检测到您目前正在经历碰撞，你肯定不希望系统由于不合时宜的GC暂停导致安全气囊延迟弹出。
 
-Providing real-time guarantees in a system requires support from all levels of the software stack: a real-time operating system (RTOS) that allows processes to be scheduled with a guaranteed allocation of CPU time in specified intervals is needed; library functions must document their worst-case execution times; dynamic memory allocation may be restricted or disallowed entirely (real-time garbage collectors exist, but the application must still ensure that it doesn’t give the GC too much work to do); and an enormous amount of testing and measurement must be done to ensure that guarantees are being met.
+在系统中提供实时保证需要软件堆栈在每个级别的支持：需要一个实时操作系统（RTOS），它允许在指定的时间间隔内为线程分配CPU时间; 库函数必须记录最坏情况下的执行时间; 动态内存分配会受到限制或完全不允许（实时垃圾收集器存在，但应用程序仍必须确保它不会给GC太多工作）; 并且必须进行大量的测试和测量以确保达到了保证条件。
 
-All of this requires a large amount of additional work and severely restricts the range of programming languages, libraries, and tools that can be used (since most languages and tools do not provide real-time guarantees). For these reasons, developing real-time systems is very expensive, and they are most commonly used in safety-critical embedded devices. Moreover, “real-time” is not the same as “high-performance” — in fact, real-time systems may have lower throughput, since they have to prioritize timely responses above all else (see also “Latency and Resource Utilization”).
+所有这些都需要大量的额外工作，并且严重限制了可以使用的编程语言、库以及工具的范围（因为大多数语言和工具不提供实时性保证）。由于这些原因，开发实时系统非常昂贵，并且它们最常用于安全关键的嵌入式设备。此外，“实时”与“高性能”不是一回事——实际上，实时系统的吞吐量可能比较低，因为它们必须把及时响应优先于其它一切（见“延迟和资源利用率”一节）。
 
-For most server-side data processing systems, real-time guarantees are simply not economical or appropriate. Consequently, these systems must suffer the pauses and clock instability that come from operating in a non-real-time environment.
+对于大多数服务器端数据处理系统来说，实时保证既不经济也不合适。因此，这些系统必须承受在非实时环境中运行时产生的暂停和时钟不稳定。
 
-#### Limiting the impact of garbage collection
+#### 限制垃圾回收机制的影响
 
-The negative effects of process pauses can be mitigated without resorting to expensive real-time scheduling guarantees. Language runtimes have some flexibility around when they schedule garbage collections, because they can track the rate of object allocation and the remaining free memory over time.
+进程暂停产生的负面影响可以在不使用昂贵的实时调度情况下就得以缓解。编程语言运行时在计划垃圾收集时有一定的灵活性，因为它们可以随着时间的推移，跟踪对象分配的速率以及剩余的可用内存容量。
 
-An emerging idea is to treat GC pauses like brief planned outages of a node, and to let other nodes handle requests from clients while one node is collecting its garbage. If the runtime can warn the application that a node soon requires a GC pause, the application can stop sending new requests to that node, wait for it to finish processing outstanding requests, and then perform the GC while no requests are in progress. This trick hides GC pauses from clients and reduces the high percentiles of response time [70, 71]. Some latency-sensitive financial trading systems [72] use this approach.
+一种新理念是把GC暂停当作节点计划内的短暂离线，而在一个节点收集垃圾的同时让其他节点处理来自客户端的请求。如果运行时可以警告应用程序节点很快需要GC暂停，应用程序可以停止向该节点发送新请求，等待它完成处理未完成的请求，然后在没有请求正在进行的情况下执行GC。这个技巧隐藏了来自客户端的GC暂停并降低了高百分比位的响应时间。一些对延迟敏感的金融交易系统使用这种方法。
 
-A variant of this idea is to use the garbage collector only for short-lived objects (which are fast to collect) and to restart processes periodically, before they accumulate enough long-lived objects to require a full GC of long-lived objects [65, 73]. One node can be restarted at a time, and traffic can be shifted away from the node before the planned restart, like in a rolling upgrade (see Chapter   4).
+这个理念的一个变种是只对短期对象（收集它们很快）上使用垃圾收集器，而在积累了足够多长期对象时不触发GC，而是定期重启进程。一次可以重启一个节点，并且可以在计划重新启动之前将流量从节点导开，就像滚动升级一样（见第4章）。
 
-These measures cannot fully prevent garbage collection pauses, but they can usefully reduce their impact on the application.
+这些措施不能完全防止垃圾收集暂停，但它们可以有效地降低它们对应用程序的影响。
