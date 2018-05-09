@@ -466,41 +466,41 @@ while (true) {
 
 最常见的是，仲裁票数超过一半节点，是绝对多数(尽管其他类型的仲裁也是可能的)。多数仲裁允许系统在单个节点出现故障时继续工作(有三个节点，可以容忍其中一个失效；对于五个节点，可以容忍其中两个失效)。然而，这仍然是安全的，因为系统中只能有一个多数——不可能出现有两个多数同时又有相互冲突的决定。在第九章讨论一致算法时，我们会更详细地讨论仲裁的使用。
 
-#### The leader and the lock
+#### 主机与锁
 
-Frequently, a system requires there to be only one of some thing. For example:
+很多时候，系统要求某些东西只能有一个在其中。比如：
 
-* Only one node is allowed to be the leader for a database partition, to avoid split brain (see “Handling Node Outages”). 
+* 数据库分区的主机只允许有一个，以防止裂脑（见“处理节点离线”一节）。
 
-* Only one transaction or client is allowed to hold the lock for a particular resource or object, to prevent concurrently writing to it and corrupting it.
+* 特定资源或对象的锁只允许一个事务或客户端持有，以防止对它并发写入、数据破坏。
 
-* Only one user is allowed to register a particular username, because a username must uniquely identify a user.
+* 每个用户名只允许一个用户注册，因为用户名必须唯一标识一个用户。
 
-Implementing this in a distributed system requires care: even if a node believes that it is “the chosen one” (the leader of the partition, the holder of the lock, the request handler of the user who successfully grabbed the username), that doesn’t necessarily mean a quorum of nodes agrees! A node may have formerly been the leader, but if the other nodes declared it dead in the meantime (e.g., due to a network interruption or GC pause), it may have been demoted and another leader may have already been elected.
+在分布式系统中实现它们需要很小心：即使节点相信自己就是“天选者”（分区中的主机，锁的拥有者，用户成功抢注了用户名的请求处理逻辑），也并不意味着众多节点组成的仲裁团同意！节点也许之前当过主机，但是如果其它节点同时宣布它失效（比如，因为网络中断或者垃圾回收暂停），它很有可能被降级，而另一个主机也许已经被选出了。
 
-If a node continues acting as the chosen one, even though the majority of nodes have declared it dead, it could cause problems in a system that is not carefully designed. Such a node could send messages to other nodes in its self-appointed capacity, and if other nodes believe it, the system as a whole may do something incorrect.
+如果节点继续以天选者的姿态行动，即使大多数节点已经宣布它失效，它会在那些没有仔细设计的系统中导致问题。这样的节点可以以自定义的容量向其它节点发送消息，那么如果其它节点选择相信它的话，系统作为一个整体可能会做一些不正确的事。
 
-For example, Figure   8-4 shows a data corruption bug due to an incorrect implementation of locking. (The bug is not theoretical: HBase used to have this problem [74, 75].) Say you want to ensure that a file in a storage service can only be accessed by one client at a time, because if multiple clients tried to write to it, the file would become corrupted. You try to implement this by requiring a client to obtain a lease from a lock service before accessing the file.
+比如，图8-4展示了由于错误的锁定实现导致的数据破坏bug。（这个bug不只是理论性的，HBase过去有这样的问题。）假设你想要保证存储服务中的文件一次只可以被一个客户端访问，因为如果多个客户端尝试写入到它的话，文件数据会被破坏。你尝试通过要求客户端在访问文件之前必须从锁定服务处获取租约来实现它。
 
-*Figure 8-4. Incorrect implementation of a distributed lock: client 1 believes that it still has a valid lease, even though it has expired, and thus corrupts a file in storage.*
+*图8-4 分布式锁不正确的实现：客户端1相信它仍然持有有效的租约，即使事实上已经过期了，并因此破坏了存储中的文件数据。*
 
-The problem is an example of what we discussed in “Process Pauses”: if the client holding the lease is paused for too long, its lease expires. Another client can obtain a lease for the same file, and start writing to the file. When the paused client comes back, it believes (incorrectly) that it still has a valid lease and proceeds to also write to the file. As a result, the clients’ writes clash and corrupt the file.
+这个问题就是我们在“进程暂停”一节讨论过的一个例子：如果持有租约的客户端暂停了太长时间，租约过期。另一个客户端可以获取同一个文件的租约，并开始写入这个问题。当客户端从暂停中恢复，它（错误地）相信自己有合法的租约并且也继续向那个文件写入数据。结果是，客户端的写入冲突，文件被破坏了。
 
-#### Fencing tokens
+#### 栅栏令牌
 
-When using a lock or lease to protect access to some resource, such as the file storage in Figure   8-4, we need to ensure that a node that is under a false belief of being “the chosen one” cannot disrupt the rest of the system. A fairly simple technique that achieves this goal is called fencing, and is illustrated in Figure   8-5.
+当使用锁或者租约来保护对某个资源的访问时，例如图8-4中的文件存储，我们需要确保错以为自己是“天选者”的节点不能破坏系统的其余部分。一种实现这个目标相当简单的技术叫做栅栏，如图8-5所示。
 
-*Figure 8-5. Making access to storage safe by allowing writes only in the order of increasing fencing tokens.*
+*图8-5 通过只允许以提升栅栏令牌的顺序的写入，使得对存储的访问变得安全*
 
-Let’s assume that every time the lock server grants a lock or lease, it also returns a fencing token, which is a number that increases every time a lock is granted (e.g., incremented by the lock service). We can then require that every time a client sends a write request to the storage service, it must include its current fencing token.
+让我们假设每一次锁服务器授出一个锁或一份租约，也同时返回一个栅栏令牌，它是一个数字，每一次锁被授出数字都会增加（比如，通过锁服务每次加一）。这样我们可以要求每一次客户端发送写入请求到存储服务时，请求都必须包含当前的栅栏令牌。
 
-In Figure   8-5, client 1 acquires the lease with a token of 33, but then it goes into a long pause and the lease expires. Client 2 acquires the lease with a token of 34 (the number always increases) and then sends its write request to the storage service, including the token of 34. Later,client 1 comes back to life and sends its write to the storage service, including its token value 33. However, the storage server remembers that it has already processed a write with a higher token number (34), and so it rejects the request with token 33.
+在图8-5中，客户端1获取了租约，令牌为33，但是之后它进入了一个长暂停于是租约过期了。客户端2获取了租约，令牌34（数字一致增加），然后发送它的写入请求到存储服务，其中包含34这个令牌。之后，客户端1恢复并发送它的请求到存储服务，其中包含令牌值33。然而，存储服务器记得它已经处理了附带更高令牌数字（34）的写入请求，于是拒绝了有令牌33的请求。
 
-If ZooKeeper is used as lock service, the transaction ID zxid or the node version cversion can be used as fencing token. Since they are guaranteed to be monotonically increasing, they have the required properties [74].
+如果使用ZooKeeper作为锁服务，那么事务ID`zxid`或者节点版本`cversion`可以用作栅栏令牌。由于它们保证为单调增的，它们满足要求的条件。
 
-Note that this mechanism requires the resource itself to take an active role in checking tokens by rejecting any writes with an older token than one that has already been processed — it is not sufficient to rely on clients checking their lock status themselves. For resources that do not explicitly support fencing tokens, you might still be able work around the limitation (for example, in the case of a file storage service you could include the fencing token in the filename). However, some kind of check is necessary to avoid processing requests outside of the lock’s protection.
+值得注意的是，这种机制要求资源自己在检查令牌时，主动拒绝任何有着比已经处理的请求更老的令牌的写入请求——依赖客户端自己检查锁状态是不足够的。对于不明确支持栅栏令牌的资源，您大概仍然可以绕过此限制（例如，在文件存储服务的场景下，可以将栅栏令牌包含在文件名中）。然而，为了避免在锁的保护之外处理请求，某些检查是必要的。
 
-Checking a token on the server side may seem like a downside, but it is arguably a good thing: it is unwise for a service to assume that its clients will always be well behaved, because the clients are often run by people whose priorities are very different from the priorities of the people running the service [76]. Thus, it is a good idea for any service to protect itself from accidentally abusive clients.
+在服务器端检查令牌看起来像是一个缺点，但它可以说是一件好事：对于服务来说，假定客户端总是表现正常并不明智，因为运行客户端的人们的优先级与运行服务的人们的优先级是非常不同的。因此，对于任何服务来说，保护自己免受意外滥用的客户端是个好主意。
 
 ### Byzantine Faults
 
