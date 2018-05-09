@@ -439,3 +439,191 @@ while (true) {
 这个理念的一个变种是只对短期对象（收集它们很快）上使用垃圾收集器，而在积累了足够多长期对象时不触发GC，而是定期重启进程。一次可以重启一个节点，并且可以在计划重新启动之前将流量从节点导开，就像滚动升级一样（见第4章）。
 
 这些措施不能完全防止垃圾收集暂停，但它们可以有效地降低它们对应用程序的影响。
+
+## 知识，真想与谎言
+
+本章到目前为止我们已经探索了分布式系统与运行在单台计算机上的程序不同的各个方式：没有共享内存，只有通过不可靠网络传递的、具有可变延迟的消息，系统还要忍受来自部分失效、不可靠的时钟和处理暂停问题。
+
+如果您不习惯于分布式系统，这些问题导致的后果会使你陷入极度混乱的状态。网络中的节点无法确切知道任何事情——它只能根据通过网络接收（或未接收）到的消息进行猜测。节点只能通过交换消息来找出另一个节点所处的状态（它存储了哪些数据，是否正常工作等）。如果远程节点没有响应，则无法知道它处于什么状态，因为没有办法可靠地将网络中的问题与节点上的问题区分开来。
+
+关于这些系统的讨论落入了哲学范畴：在我们的系统中我们知道的何为真何为假？如果知觉和测量的机制不可靠，我们对这些知识有多少信心？软件系统应该遵守我们对物理世界的期望，例如因果关系吗？
+
+幸运的是，我们不需要进一步去理解生命的意义。在分布式系统中，我们可以描述我们对行为（系统模型）的假设，并以满足这些假设的方式为目标设计实际的系统。算法可以被证明在某个系统模型中正确运行。这意味着即使底层系统模型只提供了极少的保证，可靠的行为也时可以实现的。
+
+然而，尽管可以使软件在不可靠的系统模型中表现良好，但这并不容易。在本章的其余部分中，我们会进一步探讨分布式系统中知识和真相的观念，这将有助于我们思考我们可以做出的各种假设以及我们可能希望提供的保证。在第9章中，我们将继续研究一些分布式系统的例子，以及在特定假设下提供特殊保证的算法。
+
+### 真理是由多数人定义的
+
+想象一个具有不对称故障的网络：节点能够接收发送给它的所有消息，但是从该节点发出的任何消息都被丢弃或延迟了。即使节点工作得很好，并且正在接收来自其他节点的请求，但是其他节点无法接收到它的响应。在超时之后，其他节点声明它已失效，因为它们没有从节点收到任何反馈。情况像一场噩梦般展开：半断开的节点被拖到墓地，脚在乱踢、惊声尖叫：“我还没死！”——但没有人能听到它的尖叫声，葬礼游行队伍继续肃穆的前行。
+
+在稍微不那么噩梦的场景中，半断开的节点可能注意到它正在发送的消息没有被其他节点确认，于是意识到网络中肯定发生故障了。然而，节点被其他节点错误地宣告失效，而半断开的节点对此什么都做不了。
+
+作为第三种情况，想象一个节点经历了一个长时间的完全停止的垃圾收集暂停。所有节点的线程都被GC抢占了，暂停了一分钟，因此不处理任何请求，也不发送任何响应。其他节点等待，重试，开始变得不耐烦，最终宣布节点失效并将其运到灵车上。最后，GC完成，节点的所有线程继续进行，就好像什么都没有发生一样。其他节点感到惊讶的是，已经失效的节点突然从棺材里抬起头来，完全健康，并开始愉快地与旁观者聊天。一开始，正在GC的节点甚至没有意识到整整一分钟已经过去了，并因此被宣布失效——从它的角度来看，自从最后一次与其他节点交谈以来时间几乎就没走啊。
+
+这些故事的寓意是，节点不一定可以相信自己对形势的判断。分布式系统不能完全依赖于单个节点，因为节点在任何时间都可能失效，可能使得系统卡顿且无法恢复。相反，许多分布式算法依赖于仲裁，即节点之间投票(见“读写仲裁”一节)：决策需要来自几个节点的某个最小票数，从而减少对任何一个特定节点的依赖。
+
+决策包括声明节点失效的决定。如果一组节点声明另一个节点失效了，那么它必须被认为是失效的，即使这个节点仍然感觉可以正常工作。单个节点必须遵守仲裁结果，然后离线。
+
+最常见的是，仲裁票数超过一半节点，是绝对多数(尽管其他类型的仲裁也是可能的)。多数仲裁允许系统在单个节点出现故障时继续工作(有三个节点，可以容忍其中一个失效；对于五个节点，可以容忍其中两个失效)。然而，这仍然是安全的，因为系统中只能有一个多数——不可能出现有两个多数同时又有相互冲突的决定。在第九章讨论一致算法时，我们会更详细地讨论仲裁的使用。
+
+#### The leader and the lock
+
+Frequently, a system requires there to be only one of some thing. For example:
+
+* Only one node is allowed to be the leader for a database partition, to avoid split brain (see “Handling Node Outages”). 
+
+* Only one transaction or client is allowed to hold the lock for a particular resource or object, to prevent concurrently writing to it and corrupting it.
+
+* Only one user is allowed to register a particular username, because a username must uniquely identify a user.
+
+Implementing this in a distributed system requires care: even if a node believes that it is “the chosen one” (the leader of the partition, the holder of the lock, the request handler of the user who successfully grabbed the username), that doesn’t necessarily mean a quorum of nodes agrees! A node may have formerly been the leader, but if the other nodes declared it dead in the meantime (e.g., due to a network interruption or GC pause), it may have been demoted and another leader may have already been elected.
+
+If a node continues acting as the chosen one, even though the majority of nodes have declared it dead, it could cause problems in a system that is not carefully designed. Such a node could send messages to other nodes in its self-appointed capacity, and if other nodes believe it, the system as a whole may do something incorrect.
+
+For example, Figure   8-4 shows a data corruption bug due to an incorrect implementation of locking. (The bug is not theoretical: HBase used to have this problem [74, 75].) Say you want to ensure that a file in a storage service can only be accessed by one client at a time, because if multiple clients tried to write to it, the file would become corrupted. You try to implement this by requiring a client to obtain a lease from a lock service before accessing the file.
+
+*Figure 8-4. Incorrect implementation of a distributed lock: client 1 believes that it still has a valid lease, even though it has expired, and thus corrupts a file in storage.*
+
+The problem is an example of what we discussed in “Process Pauses”: if the client holding the lease is paused for too long, its lease expires. Another client can obtain a lease for the same file, and start writing to the file. When the paused client comes back, it believes (incorrectly) that it still has a valid lease and proceeds to also write to the file. As a result, the clients’ writes clash and corrupt the file.
+
+#### Fencing tokens
+
+When using a lock or lease to protect access to some resource, such as the file storage in Figure   8-4, we need to ensure that a node that is under a false belief of being “the chosen one” cannot disrupt the rest of the system. A fairly simple technique that achieves this goal is called fencing, and is illustrated in Figure   8-5.
+
+*Figure 8-5. Making access to storage safe by allowing writes only in the order of increasing fencing tokens.*
+
+Let’s assume that every time the lock server grants a lock or lease, it also returns a fencing token, which is a number that increases every time a lock is granted (e.g., incremented by the lock service). We can then require that every time a client sends a write request to the storage service, it must include its current fencing token.
+
+In Figure   8-5, client 1 acquires the lease with a token of 33, but then it goes into a long pause and the lease expires. Client 2 acquires the lease with a token of 34 (the number always increases) and then sends its write request to the storage service, including the token of 34. Later,client 1 comes back to life and sends its write to the storage service, including its token value 33. However, the storage server remembers that it has already processed a write with a higher token number (34), and so it rejects the request with token 33.
+
+If ZooKeeper is used as lock service, the transaction ID zxid or the node version cversion can be used as fencing token. Since they are guaranteed to be monotonically increasing, they have the required properties [74].
+
+Note that this mechanism requires the resource itself to take an active role in checking tokens by rejecting any writes with an older token than one that has already been processed — it is not sufficient to rely on clients checking their lock status themselves. For resources that do not explicitly support fencing tokens, you might still be able work around the limitation (for example, in the case of a file storage service you could include the fencing token in the filename). However, some kind of check is necessary to avoid processing requests outside of the lock’s protection.
+
+Checking a token on the server side may seem like a downside, but it is arguably a good thing: it is unwise for a service to assume that its clients will always be well behaved, because the clients are often run by people whose priorities are very different from the priorities of the people running the service [76]. Thus, it is a good idea for any service to protect itself from accidentally abusive clients.
+
+### Byzantine Faults
+
+Fencing tokens can detect and block a node that is inadvertently acting in error (e.g., because it hasn’t yet found out that its lease has expired). However, if the node deliberately wanted to subvert the system’s guarantees, it could easily do so by sending messages with a fake fencing token.
+
+In this book we assume that nodes are unreliable but honest: they may be slow or never respond (due to a fault), and their state may be outdated (due to a GC pause or network delays), but we assume that if a node does respond, it is telling the “truth”: to the best of its knowledge, it is playing by the rules of the protocol.
+
+Distributed systems problems become much harder if there is a risk that nodes may “lie” (send arbitrary faulty or corrupted responses) — for example, if a node may claim to have received a particular message when in fact it didn’t. Such behavior is known as a Byzantine fault, and the problem of reaching consensus in this untrusting environment is known as the Byzantine Generals Problem [77].
+
+> The Byzantine Generals Problem
+>
+> The Byzantine Generals Problem is a generalization of the so-called Two Generals Problem [78], which imagines a situation in which two army generals need to agree on a battle plan. As they have set up camp on two different sites, they can only communicate by messenger, and the messengers sometimes get delayed or lost (like packets in a network). We will discuss this problem of consensus in Chapter   9.
+>
+> In the Byzantine version of the problem, there are n generals who need to agree, and their endeavor is hampered by the fact that there are some traitors in their midst. Most of the generals are loyal, and thus send truthful messages, but the traitors may try to deceive and confuse the others by sending fake or untrue messages (while trying to remain undiscovered). It is not known in advance who the traitors are. >
+>
+> Byzantium was an ancient Greek city that later became Constantinople, in the place which is now Istanbul in Turkey. There isn’t any historic evidence that the generals of Byzantium were any more prone to intrigue and conspiracy than those elsewhere. Rather, the name is derived from Byzantine in the sense of excessively complicated, bureaucratic, devious, which was used in politics long before computers [79]. Lamport wanted to choose a nationality that would not offend any readers, and he was advised that calling it The Albanian Generals Problem was not such a good idea [80].
+
+A system is Byzantine fault-tolerant if it continues to operate correctly even if some of the nodes are malfunctioning and not obeying the protocol, or if malicious attackers are interfering with the network. This concern is relevant in certain specific circumstances. For example:
+
+* In aerospace environments, the data in a computer’s memory or CPU register could become corrupted by radiation, leading it to respond to other nodes in arbitrarily unpredictable ways. Since a system failure would be very expensive (e.g., an aircraft crashing and killing everyone on board, or a rocket colliding with the International Space Station), flight control systems must tolerate Byzantine faults [81, 82].
+
+* In a system with multiple participating organizations, some participants may attempt to cheat or defraud others. In such circumstances, it is not safe for a node to simply trust another node’s messages, since they may be sent with malicious intent. For example, peer-to-peer networks like Bitcoin and other blockchains can be considered to be a way of getting mutually untrusting parties to agree whether a transaction happened or not, without relying on a central authority [83].
+
+However, in the kinds of systems we discuss in this book, we can usually safely assume that there are no Byzantine faults. In your datacenter, all the nodes are controlled by your organization (so they can hopefully be trusted) and radiation levels are low enough that memory corruption is not a major problem. Protocols for making systems Byzantine fault-tolerant are quite complicated [84], and fault-tolerant embedded systems rely on support from the hardware level [81]. In most server-side data systems, the cost of deploying Byzantine fault-tolerant solutions makes them impractical.
+
+Web applications do need to expect arbitrary and malicious behavior of clients that are under end-user control, such as web browsers. This is why input validation, sanitization, and output escaping are so important: to prevent SQL injection and cross-site scripting, for example. However, we typically don’t use Byzantine fault-tolerant protocols here, but simply make the server the authority on deciding what client behavior is and isn’t allowed. In peer-to-peer networks, where there is no such central authority, Byzantine fault tolerance is more relevant.
+
+A bug in the software could be regarded as a Byzantine fault, but if you deploy the same software to all nodes, then a Byzantine fault-tolerant algorithm cannot save you. Most Byzantine fault-tolerant algorithms require a supermajority of more than two-thirds of the nodes to be functioning correctly (i.e., if you have four nodes, at most one may malfunction). To use this approach against bugs, you would have to have four independent implementations of the same software and hope that a bug only appears in one of the four implementations.
+
+Similarly, it would be appealing if a protocol could protect us from vulnerabilities, security compromises, and malicious attacks. Unfortunately, this is not realistic either: in most systems, if an attacker can compromise one node, they can probably compromise all of them, because they are probably running the same software. Thus, traditional mechanisms (authentication, access control, encryption, firewalls, and so on) continue to be the main protection against attackers.
+
+#### Weak forms of lying
+
+Although we assume that nodes are generally honest, it can be worth adding mechanisms to software that guard against weak forms of “lying” — for example, invalid messages due to hardware issues, software bugs, and misconfiguration. Such protection mechanisms are not full-blown Byzantine fault tolerance, as they would not withstand a determined adversary, but they are nevertheless simple and pragmatic steps toward better reliability. For example:
+
+* Network packets do sometimes get corrupted due to hardware issues or bugs in operating systems, drivers, routers, etc. Usually, corrupted packets are caught by the checksums built into TCP and UDP, but sometimes they evade detection [85, 86, 87]. Simple measures are usually sufficient protection against such corruption, such as checksums in the application-level protocol.
+
+* A publicly accessible application must carefully sanitize any inputs from users, for example checking that a value is within a reasonable range and limiting the size of strings to prevent denial of service through large memory allocations. An internal service behind a firewall may be able to get away with less strict checks on inputs, but some basic sanity-checking of values (e.g., in protocol parsing [85]) is a good idea.
+
+* NTP clients can be configured with multiple server addresses. When synchronizing, the client contacts all of them, estimates their errors, and checks that a majority of servers agree on some time range. As long as most of the servers are okay, a misconfigured NTP server that is reporting an incorrect time is detected as an outlier
+
+### System Model and Reality
+
+Many algorithms have been designed to solve distributed systems problems — for example, we will examine solutions for the consensus problem in Chapter   9. In order to be useful, these algorithms need to tolerate the various faults of distributed systems that we discussed in this chapter.
+
+Algorithms need to be written in a way that does not depend too heavily on the details of the hardware and software configuration on which they are run. This in turn requires that we somehow formalize the kinds of faults that we expect to happen in a system. We do this by defining a system model, which is an abstraction that describes what things an algorithm may assume.
+
+With regard to timing assumptions, three system models are in common use:
+
+*Synchronous model*
+
+The synchronous model assumes bounded network delay, bounded process pauses, and bounded clock error. This does not imply exactly synchronized clocks or zero network delay; it just means you know that network delay, pauses, and clock drift will never exceed some fixed upper bound [88]. The synchronous model is not a realistic model of most practical systems, because (as discussed in this chapter) unbounded delays and pauses do occur.
+
+*Partially synchronous model*
+
+Partial synchrony means that a system behaves like a synchronous system most of the time, but it sometimes exceeds the bounds for network delay, process pauses, and clock drift [88]. This is a realistic model of many systems: most of the time, networks and processes are quite well behaved — otherwise we would never be able to get anything done — but we have to reckon with the fact that any timing assumptions may be shattered occasionally. When this happens, network delay, pauses, and clock error may become arbitrarily large.
+
+*Asynchronous model*
+
+In this model, an algorithm is not allowed to make any timing assumptions — in fact, it does not even have a clock (so it cannot use timeouts). Some algorithms can be designed for the asynchronous model, but it is very restrictive.
+
+Moreover, besides timing issues, we have to consider node failures. The three most common system models for nodes are:
+
+*Crash-stop faults*
+
+In the crash-stop model, an algorithm may assume that a node can fail in only one way, namely by crashing. This means that the node may suddenly stop responding at any moment, and thereafter that node is gone forever — it never comes back.
+
+*Crash-recovery faults*
+
+We assume that nodes may crash at any moment, and perhaps start responding again after some unknown time. In the crash-recovery model, nodes are assumed to have stable storage (i.e., nonvolatile disk storage) that is preserved across crashes, while the in-memory state is assumed to be lost.
+
+*Byzantine (arbitrary) faults*
+
+Nodes may do absolutely anything, including trying to trick and deceive other nodes, as described in the last section.
+
+For modeling real systems, the partially synchronous model with crash-recovery faults is generally the most useful model. But how do distributed algorithms cope with that model?
+
+#### Correctness of an algorithm
+
+To define what it means for an algorithm to be correct, we can describe its properties. For example, the output of a sorting algorithm has the property that for any two distinct elements of the output list, the element further to the left is smaller than the element further to the right. That is simply a formal way of defining what it means for a list to be sorted.
+
+Similarly, we can write down the properties we want of a distributed algorithm to define what it means to be correct. For example, if we are generating fencing tokens for a lock (see “Fencing tokens”), we may require the algorithm to have the following properties:
+
+*Uniqueness*
+
+No two requests for a fencing token return the same value.
+
+*Monotonic sequence*
+
+If request x returned token tx, and request y returned token ty, and x completed before y began, then tx   <   ty.
+
+*Availability*
+
+A node that requests a fencing token and does not crash eventually receives a response.
+
+An algorithm is correct in some system model if it always satisfies its properties in all situations that we assume may occur in that system model. But how does this make sense? If all nodes crash, or all network delays suddenly become infinitely long, then no algorithm will be able to get anything done.
+
+#### Safety and liveness
+
+To clarify the situation, it is worth distinguishing between two different kinds of properties: safety and liveness properties. In the example just given, uniqueness and monotonic sequence are safety properties, but availability is a liveness property.
+
+What distinguishes the two kinds of properties? A giveaway is that liveness properties often include the word “eventually” in their definition. (And yes, you guessed it — eventual consistency is a liveness property [89].)
+
+Safety is often informally defined as nothing bad happens, and liveness as something good eventually happens. However, it’s best to not read too much into those informal definitions, because the meaning of good and bad is subjective. The actual definitions of safety and liveness are precise and mathematical [90]:
+
+* If a safety property is violated, we can point at a particular point in time at which it was broken (for example, if the uniqueness property was violated, we can identify the particular operation in which a duplicate fencing token was returned). After a safety property has been violated, the violation cannot be undone — the damage is already done.
+
+* A liveness property works the other way round: it may not hold at some point in time (for example, a node may have sent a request but not yet received a response), but there is always hope that it may be satisfied in the future (namely by receiving a response).
+
+An advantage of distinguishing between safety and liveness properties is that it helps us deal with difficult system models. For distributed algorithms, it is common to require that safety properties always hold, in all possible situations of a system model [88]. That is, even if all nodes crash, or the entire network fails, the algorithm must nevertheless ensure that it does not return a wrong result (i.e., that the safety properties remain satisfied).
+
+However, with liveness properties we are allowed to make caveats: for example, we could say that a request needs to receive a response only if a majority of nodes have not crashed, and only if the network eventually recovers from an outage. The definition of the partially synchronous model requires that eventually the system returns to a synchronous state — that is, any period of network interruption lasts only for a finite duration and is then repaired.
+
+#### Mapping system models to the real world
+
+Safety and liveness properties and system models are very useful for reasoning about the correctness of a distributed algorithm. However, when implementing an algorithm in practice, the messy facts of reality come back to bite you again, and it becomes clear that the system model is a simplified abstraction of reality.
+
+For example, algorithms in the crash-recovery model generally assume that data in stable storage survives crashes. However, what happens if the data on disk is corrupted, or the data is wiped out due to hardware error or misconfiguration [91]? What happens if a server has a firmware bug and fails to recognize its hard drives on reboot, even though the drives are correctly attached to the server [92]?
+
+Quorum algorithms (see “Quorums for reading and writing”) rely on a node remembering the data that it claims to have stored. If a node may suffer from amnesia and forget previously stored data, that breaks the quorum condition, and thus breaks the correctness of the algorithm. Perhaps a new system model is needed, in which we assume that stable storage mostly survives crashes, but may sometimes be lost. But that model then becomes harder to reason about.
+
+The theoretical description of an algorithm can declare that certain things are simply assumed not to happen — and in non-Byzantine systems, we do have to make some assumptions about faults that can and cannot happen. However, a real implementation may still have to include code to handle the case where something happens that was assumed to be impossible, even if that handling boils down to printf(" Sucks to be you") and exit( 666) — i.e., letting a human operator clean up the mess [93]. (This is arguably the difference between computer science and software engineering.)
+
+That is not to say that theoretical, abstract system models are worthless — quite the opposite. They are incredibly helpful for distilling down the complexity of real systems to a manageable set of faults that we can reason about, so that we can understand the problem and try to solve it systematically. We can prove algorithms correct by showing that their properties always hold in some system model.
+
+Proving an algorithm correct does not mean its implementation on a real system will necessarily always behave correctly. But it’s a very good first step, because the theoretical analysis can uncover problems in an algorithm that might remain hidden for a long time in a real system, and that only come to bite you when your assumptions (e.g., about timing) are defeated due to unusual circumstances. Theoretical analysis and empirical testing are equally important.
