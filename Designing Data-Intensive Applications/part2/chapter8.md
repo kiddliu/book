@@ -524,7 +524,7 @@ while (true) {
 
 * 在有多个参与组织的系统中，一些参与者会尝试欺骗他人。在这种情况下，节点直接信任另一个节点的消息是不安全的，因为消息可能包含恶意的企图。例如，像比特币和其他区块链产品这样的点对点网络可以认为是一种让互不信任的各方就交易是否发生达成一致的方式，而无需依赖于中央机构。
 
-然而在本书讨论的这些系统中，我们通常可以安全地假设不存在拜占庭故障。在你的数据中心中，所有节点都由你的组织控制（因此他们可以获得信任），且辐射级别足够低内存损坏不是大问题。使系统拜占庭容错的协议相当复杂[84]，而容错的嵌入式系统依赖于硬件层面的支持。在大多数服务器端数据系统中，部署拜占庭容错解决方案的成本高得不切实际。
+然而在本书讨论的这些系统中，我们通常可以安全地假设不存在拜占庭故障。在你的数据中心中，所有节点都由你的组织控制（因此他们可以获得信任），且辐射级别足够低内存损坏不是大问题。使系统拜占庭容错的协议相当复杂，而容错的嵌入式系统依赖于硬件层面的支持。在大多数服务器端数据系统中，部署拜占庭容错解决方案的成本高得不切实际。
 
 Web应用程序确实需要预见到最终用户控制下的客户端任意、恶意行为，例如网页浏览器。这就是为什么输入的验证、清理以及输出转义如此重要的原因：例如，防止SQL注入和跨站点脚本。但是，我们通常不会在这里使用拜占庭容错协议，而只是让服务器决定什么样的客户端行为是允许的而哪些是不允许的。在没有这种中央管理机构的点对点网络中，拜占庭式容错更相关一些。
 
@@ -532,59 +532,59 @@ Web应用程序确实需要预见到最终用户控制下的客户端任意、�
 
 同样，如果一个协议可以保护我们免于漏洞、安全隐患以及恶意攻击，那将是很有吸引力的。然而这也是不现实的：在大多数系统中，如果攻击者可以攻陷一个节点，他们可能会攻陷所有这些节点，因为它们大概运行的是同一款的软件。因此，传统机制（认证，访问控制，加密，防火墙等）仍然是抵御攻击者的主要防护措施。
 
-#### Weak forms of lying
+#### 撒谎的弱形式
 
-Although we assume that nodes are generally honest, it can be worth adding mechanisms to software that guard against weak forms of “lying” — for example, invalid messages due to hardware issues, software bugs, and misconfiguration. Such protection mechanisms are not full-blown Byzantine fault tolerance, as they would not withstand a determined adversary, but they are nevertheless simple and pragmatic steps toward better reliability. For example:
+虽然我们假设节点通常是诚实的，但是仍然值得向软件添加机制以防止“撒谎”的弱形式——例如，由硬件问题、软件bug以及错误配置导致的无效消息。这种保护机制并不是全面的拜占庭式容错，因为它们无法面对下了决心的对手，但是它们仍然是实现更好可靠性的简单而实用的步骤。例如：
 
-* Network packets do sometimes get corrupted due to hardware issues or bugs in operating systems, drivers, routers, etc. Usually, corrupted packets are caught by the checksums built into TCP and UDP, but sometimes they evade detection [85, 86, 87]. Simple measures are usually sufficient protection against such corruption, such as checksums in the application-level protocol.
+* 由于硬件问题或者是操作系统、驱动、路由器等中的bug，网络数据包有时会被破坏。通常，损坏的数据包被内置于TCP和UDP的校验码捕获，但有时他们能逃避检测。简单的措施通常可以充分防止此类破坏，例如应用程序级协议中的校验和。
 
-* A publicly accessible application must carefully sanitize any inputs from users, for example checking that a value is within a reasonable range and limiting the size of strings to prevent denial of service through large memory allocations. An internal service behind a firewall may be able to get away with less strict checks on inputs, but some basic sanity-checking of values (e.g., in protocol parsing [85]) is a good idea.
+* 可以公开访问的应用程序必须仔细清理来自用户的任何输入，比如检查值是否在合理范围内，限制字符串的大小以防止由于大内存分配导致拒绝服务。位于防火墙后的内部服务大概可以对输入进行较不严格的检查也不出问题，但是对值进行一些基本的清理检查（例如，在协议解析中）是一个好主意。
 
-* NTP clients can be configured with multiple server addresses. When synchronizing, the client contacts all of them, estimates their errors, and checks that a majority of servers agree on some time range. As long as most of the servers are okay, a misconfigured NTP server that is reporting an incorrect time is detected as an outlier
+* NTP客户端可以配置多个服务器地址。同步时，客户端联系所有服务器，预估它们的误差，并检查大多数服务器在某个时间范围内达成一致。只要大多数服务器都正常，配置错误导致报告错误时间的NTP服务器会被检测为异常。
 
-### System Model and Reality
+### 系统模型与现实
 
-Many algorithms have been designed to solve distributed systems problems — for example, we will examine solutions for the consensus problem in Chapter   9. In order to be useful, these algorithms need to tolerate the various faults of distributed systems that we discussed in this chapter.
+已经设计了许多算法来解决分布式系统问题——例如，我们将在第9章中研究共识问题的解决方案。为了有用，这些算法需要容忍我们在本章中讨论到各种分布式系统的故障。
 
-Algorithms need to be written in a way that does not depend too heavily on the details of the hardware and software configuration on which they are run. This in turn requires that we somehow formalize the kinds of faults that we expect to happen in a system. We do this by defining a system model, which is an abstraction that describes what things an algorithm may assume.
+算法编写的方式，不能太依赖于执行它们的软硬件配置的细节。这又要求我们以某种方式确定我们期望在系统中发生的故障类型。我们通过定义一个系统模型来做到这一点，它是抽象描述了算法可能假设的事情。
 
-With regard to timing assumptions, three system models are in common use:
+考虑到对时间假设，常用下面三种系统模型：
 
-*Synchronous model*
+*同步模型*
 
-The synchronous model assumes bounded network delay, bounded process pauses, and bounded clock error. This does not imply exactly synchronized clocks or zero network delay; it just means you know that network delay, pauses, and clock drift will never exceed some fixed upper bound [88]. The synchronous model is not a realistic model of most practical systems, because (as discussed in this chapter) unbounded delays and pauses do occur.
+同步模型假设有限的网络延迟，有限的进程暂停以及有限的时钟误差。这并不意味着完全同步的时钟或零网络延迟; 它只意味着你知道网络延迟，暂停和时钟漂移不会超过某个固定的上限。同步模型不是大多数实际系统的真实模型，因为（如本章所讨论的）无限的延迟和暂停确实会发生。
 
-*Partially synchronous model*
+*部分同步模型*
 
-Partial synchrony means that a system behaves like a synchronous system most of the time, but it sometimes exceeds the bounds for network delay, process pauses, and clock drift [88]. This is a realistic model of many systems: most of the time, networks and processes are quite well behaved — otherwise we would never be able to get anything done — but we have to reckon with the fact that any timing assumptions may be shattered occasionally. When this happens, network delay, pauses, and clock error may become arbitrarily large.
+部分同步意味着系统大部分时候都像同步系统一样运行，但有时会出现超出网络延迟，进程暂停以及时钟漂移界限的情况。这是许多系统的现实模型：大多数时候，网络和进程都表现得相当正常——否则我们永远无法完成任何事情——但我们必须考虑到任何的时间假设偶尔都会被破坏的事实。当这种情况发生时，网络延迟，暂停以及时钟误差都会变得非常大。
 
-*Asynchronous model*
+*异步模型*
 
-In this model, an algorithm is not allowed to make any timing assumptions — in fact, it does not even have a clock (so it cannot use timeouts). Some algorithms can be designed for the asynchronous model, but it is very restrictive.
+在这个模型中，算法不允许做任何时间假设——事实上，它甚至没有时钟（所以它不能使用超时）。一些算法可以设计用于异步模型，但限制非常多的。
 
-Moreover, besides timing issues, we have to consider node failures. The three most common system models for nodes are:
+此外除了时间问题，我们还必须考虑节点失效。三种最常见的节点（故障）系统模型是：
 
-*Crash-stop faults*
+*崩溃-停止故障*
 
-In the crash-stop model, an algorithm may assume that a node can fail in only one way, namely by crashing. This means that the node may suddenly stop responding at any moment, and thereafter that node is gone forever — it never comes back.
+在崩溃-停止模型中，算法可能会假设节点只能以一种方式发生故障，即崩溃。这意味着节点可能会在任何时刻突然停止响应，然后该节点永远消失——它永远不会重新上线。
 
-*Crash-recovery faults*
+*崩溃-恢复故障*
 
-We assume that nodes may crash at any moment, and perhaps start responding again after some unknown time. In the crash-recovery model, nodes are assumed to have stable storage (i.e., nonvolatile disk storage) that is preserved across crashes, while the in-memory state is assumed to be lost.
+我们假设节点随时可能崩溃，并且可能在未知的时间后再次开始响应。在崩溃-恢复模型中，假设节点具有稳定的存储（即非易失性磁盘存储），该存储在整个崩溃期间被保留，而内存中状态被假定为丢失了。
 
-*Byzantine (arbitrary) faults*
+*拜占庭式 （任意）故障*
 
-Nodes may do absolutely anything, including trying to trick and deceive other nodes, as described in the last section.
+如上一节所述，节点会做任何事情，包括试图欺骗其他节点。
 
-For modeling real systems, the partially synchronous model with crash-recovery faults is generally the most useful model. But how do distributed algorithms cope with that model?
+对于真实系统建模，具有崩溃-恢复故障机制的部分同步模型通常是最有用的模型。但是分布式算法如何应对这种模型呢？
 
-#### Correctness of an algorithm
+#### 算法的正确性
 
-To define what it means for an algorithm to be correct, we can describe its properties. For example, the output of a sorting algorithm has the property that for any two distinct elements of the output list, the element further to the left is smaller than the element further to the right. That is simply a formal way of defining what it means for a list to be sorted.
+为了定义算法正确意味着什么，我们可以描述它的属性。例如，排序算法的输出具有以下特性：对于输出列表中的任何两个不同元素，左侧的元素小于右侧的元素。这就是定义列表排序含义的正式方式。
 
-Similarly, we can write down the properties we want of a distributed algorithm to define what it means to be correct. For example, if we are generating fencing tokens for a lock (see “Fencing tokens”), we may require the algorithm to have the following properties:
+同样，我们可以写下我们想要的分布式算法的属性，以定义它的正确含义。例如，如果我们为锁生成栅栏令牌（见“栅栏令牌”一节），我们会要求算法具有以下属性：
 
-*Uniqueness*
+*唯一性*
 
 No two requests for a fencing token return the same value.
 
