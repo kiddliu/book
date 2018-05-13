@@ -586,44 +586,70 @@ Web应用程序确实需要预见到最终用户控制下的客户端任意、�
 
 *唯一性*
 
-No two requests for a fencing token return the same value.
+两个栅栏令牌请求不能返回相同的值。
 
-*Monotonic sequence*
+*单调序列性*
 
-If request x returned token tx, and request y returned token ty, and x completed before y began, then tx   <   ty.
+如果请求*x*返回了令牌*t<sub>x</sub>*请求*y*返回了令牌*t<sub>y</sub>*，并且*x*在*y*开始之前完成了，那么*t<sub>x</sub>* < *t<sub>y</sub>*。
 
-*Availability*
+*可用性*
 
-A node that requests a fencing token and does not crash eventually receives a response.
+请求防护令牌并且不会崩溃的节点最终一定会收到响应。
 
-An algorithm is correct in some system model if it always satisfies its properties in all situations that we assume may occur in that system model. But how does this make sense? If all nodes crash, or all network delays suddenly become infinitely long, then no algorithm will be able to get anything done.
+如果算法在系统模型的所有情况下总是满足它的属性，那我们说这个算法在系统模型中是正确的。但是它的意义何在？如果所有节点崩溃，或者所有的网络延迟变得无限长，那么没有任何算法可以完成任何事情。
 
-#### Safety and liveness
+#### 安全性与活跃性
 
-To clarify the situation, it is worth distinguishing between two different kinds of properties: safety and liveness properties. In the example just given, uniqueness and monotonic sequence are safety properties, but availability is a liveness property.
+为了澄清这种情况，就有必要区分两类不同的性质：安全性和活跃性。在刚刚给出的例子中，唯一性和单调序列性是安全属性，但可用性是活跃性属性。
 
-What distinguishes the two kinds of properties? A giveaway is that liveness properties often include the word “eventually” in their definition. (And yes, you guessed it — eventual consistency is a liveness property [89].)
+两种性质有什么区别？友情提示，活跃性属性的定义中通常都包含“最终”这个词。（是的，你猜对了——最终一致性是活跃性属性。）
 
-Safety is often informally defined as nothing bad happens, and liveness as something good eventually happens. However, it’s best to not read too much into those informal definitions, because the meaning of good and bad is subjective. The actual definitions of safety and liveness are precise and mathematical [90]:
+安全性通常被非正式地定义为没有什么不好的事情发生，而活跃性则是最终发生的好事情。然而，最好不要过度解读这些非正式的定义，因为好与坏的含义是主观的。安全性和活跃性的实际定义是很精确的，可以用数学描述的：
 
-* If a safety property is violated, we can point at a particular point in time at which it was broken (for example, if the uniqueness property was violated, we can identify the particular operation in which a duplicate fencing token was returned). After a safety property has been violated, the violation cannot be undone — the damage is already done.
+* 如果违反了安全性，我们可以指出它被破坏的特定时间点（例如，如果违反了唯一性，我们可以识别出返回了重复的栅栏令牌的那个操作）。违反安全性后，违规行为不能撤销 ——损害已经在那里了。
 
-* A liveness property works the other way round: it may not hold at some point in time (for example, a node may have sent a request but not yet received a response), but there is always hope that it may be satisfied in the future (namely by receiving a response).
+* 活跃性是完全反过来的：在某个时间点它也许不成立（例如，节点可能发送了一个请求，但还没有收到响应），但它总是有希望在未来是成立的（比如收到了响应）。
 
-An advantage of distinguishing between safety and liveness properties is that it helps us deal with difficult system models. For distributed algorithms, it is common to require that safety properties always hold, in all possible situations of a system model [88]. That is, even if all nodes crash, or the entire network fails, the algorithm must nevertheless ensure that it does not return a wrong result (i.e., that the safety properties remain satisfied).
+区分安全性和活跃性属性的好处在于它可以帮助我们处理复杂的系统模型。对于分布式算法，通常要求在系统模型的所有可能情况下，安全性始终成立。也就是说，即使所有节点崩溃，或者整个网络发生故障，算法仍然必须保证它不会返回错误的结果（也就是，算法依旧满足安全性）。
 
-However, with liveness properties we are allowed to make caveats: for example, we could say that a request needs to receive a response only if a majority of nodes have not crashed, and only if the network eventually recovers from an outage. The definition of the partially synchronous model requires that eventually the system returns to a synchronous state — that is, any period of network interruption lasts only for a finite duration and is then repaired.
+然而有了活跃性属性我们可以发出警告：例如，我们可以说，请求只有在大多数节点没有崩溃的情况下，并且只有当网络最终从停摆中恢复时，才需要接收响应。部分同步模型的定义要求系统最终返回到同步状态——即任何网络中断都只能持续一段有限的时间，之后就修复了。
 
-#### Mapping system models to the real world
+#### 把系统模型映射到真实世界
 
-Safety and liveness properties and system models are very useful for reasoning about the correctness of a distributed algorithm. However, when implementing an algorithm in practice, the messy facts of reality come back to bite you again, and it becomes clear that the system model is a simplified abstraction of reality.
+安全性和活跃性属性以及系统模型对推理分布式算法的正确性非常有用。然而在实践中应用算法时，混乱的现实会再次让你再次陷入困境，而且很明显的是系统模型是对现实的简化抽象。
 
-For example, algorithms in the crash-recovery model generally assume that data in stable storage survives crashes. However, what happens if the data on disk is corrupted, or the data is wiped out due to hardware error or misconfiguration [91]? What happens if a server has a firmware bug and fails to recognize its hard drives on reboot, even though the drives are correctly attached to the server [92]?
+例如，崩溃-恢复模型中的算法通常假设存储器中的数据是能撑过崩溃的状态。然而，如果磁盘上的数据损坏，或者由于硬件错误或配置错误导致数据被清除会发生什么？如果服务器存在固件错误，并且在重新启动后驱动器已正确连接到服务器，但无法识别硬盘驱动器会发生什么情况？
 
-Quorum algorithms (see “Quorums for reading and writing”) rely on a node remembering the data that it claims to have stored. If a node may suffer from amnesia and forget previously stored data, that breaks the quorum condition, and thus breaks the correctness of the algorithm. Perhaps a new system model is needed, in which we assume that stable storage mostly survives crashes, but may sometimes be lost. But that model then becomes harder to reason about.
+仲裁算法（见“读写仲裁”一节）依赖节点记住它声称存储的数据。如果一个节点会有健忘症，忘记以前存储的数据，那么会打破仲裁条件，从而破坏算法的正确性。也许需要一个新的系统模型，在这个模型中我们假设稳定的存储大多撑过了崩溃的状态，但有时可能会丢失。但是这个模型会变得更难以推理。
 
-The theoretical description of an algorithm can declare that certain things are simply assumed not to happen — and in non-Byzantine systems, we do have to make some assumptions about faults that can and cannot happen. However, a real implementation may still have to include code to handle the case where something happens that was assumed to be impossible, even if that handling boils down to printf(" Sucks to be you") and exit( 666) — i.e., letting a human operator clean up the mess [93]. (This is arguably the difference between computer science and software engineering.)
+算法的理论性描述可以声明某些事情可以简单地假定为不会发生——在非拜占庭系统中，我们必须对可能发生和不可能发生的故障做出一些假设。然而，一个真正的实现可能仍然需要包含代码来处理那些被认为是不可能的事情，即使这个处理只是`printf（“你搞砸了吧”）`和`exit(666)`——即让运营工程师清理这个烂摊子。（这可以说是计算机科学和软件工程之间的差异。）
 
-That is not to say that theoretical, abstract system models are worthless — quite the opposite. They are incredibly helpful for distilling down the complexity of real systems to a manageable set of faults that we can reason about, so that we can understand the problem and try to solve it systematically. We can prove algorithms correct by showing that their properties always hold in some system model.
+这并不是说理论性的抽象系统模型是毫无价值的——恰恰相反。它们对于将实际系统的复杂性提炼成一套我们可以推理的易于管理的故障集非常有用，以便我们能够理解问题并尝试系统性地解决它。我们可以通过证明它们的属性在某个系统模型中总是成立来证明算法是正确的。
 
-Proving an algorithm correct does not mean its implementation on a real system will necessarily always behave correctly. But it’s a very good first step, because the theoretical analysis can uncover problems in an algorithm that might remain hidden for a long time in a real system, and that only come to bite you when your assumptions (e.g., about timing) are defeated due to unusual circumstances. Theoretical analysis and empirical testing are equally important.
+证明算法正确并不意味着它在真实系统上的实现总是行为正确的。但这是一个非常好的第一步，因为理论性分析可以发现算法中存在的问题，它们很可能会在实际系统中长时间隐藏，并且只有当你的假设（例如，关于时间）因为异常情况不成立的时候才会让你陷入困境。理论性分析和实践性测试是同样重要的。
+
+## 小结
+
+在这一章，我们讨论了分布式系统中可能发生的各种问题，这包括：
+
+* 每当尝试通过网络发送数据包时，数据包可能会丢失或任意延迟。同样地，回复可能会丢失或延迟，所以如果你没有得到响应，你不知道消息是不是发过去了。
+
+* 节点的时钟可能与其他节点的时钟显着不同步（尽管尽了最大努力设置NTP），它可能会突然前移或后退，于是依赖它是危险的，因为你很可能对时钟误差范围没有一个好的把握。
+
+* 进程可能会在其执行的任何时间点暂停相当长的时间（可能是由于停止所有活动的垃圾收集器），被其他节点宣告失效，之后再次上线同时没有意识到自己被暂停过。
+
+会发生*部分故障*事实是分布式系统的定义特征。每当软件试图做任何涉及其他节点的事情，都有偶尔会失败，或随机变慢，或者根本没有响应（并且最终超时）的可能性。在分布式系统中，我们试图将部分故障的容忍度建立到软件中，这样整个系统即使在某些组成部分损坏时也可以继续运行。
+
+为了容错，第一步是*检测*它们，但即使这样也很难。大多数系统没有准确的机制来检测节点是不是失效了，因此大多数分布式算法依靠超时来确定远程节点是否仍然可用。但是，超时无法区分网络和节点故障，并且可变的网络延迟有时会导致错误地怀疑节点发生崩溃。此外，有时节点可能处于降级状态：例如，由于驱动bug，千兆网络接口可能突然下降到1千字节/秒的吞吐量。这种勉强运行但还没有失效的节点可能比完全失效的节点更难处理。
+
+一旦检测到错误，让系统容忍它也不容易：在设备之间没有全局变量，没有共享内存，没有常识或任何其他类型的共享状态。节点甚至无法在时间上达成一致，更不用说更深刻的东西了。信息从一个节点流向另一个节点的唯一途径是通过不可靠的网络发送信息。重大决策不能由单个节点安全地完成，因此我们需要从其他节点获得帮助并尝试达到仲裁人数的协议。
+
+如果您已经习惯为拥有理想化的数学完美环境的单台计算机写软件，其中相同的操作始终确定地返回相同的结果，那么转向分布式系统的凌乱现实中可能有点令人震惊。相反地，如果分布式系统工程师可以在单台计算机上解决问题，那么他们通常会认为这个问题微不足道，实际上今天的单台计算机可以做很多事情。如果你可以避免打开潘多拉的盒子，把所有的工作放在单台设备上，通常这是值得的。
+
+但是，正如在第二部分的介绍中所讨论的那样，可扩展性并不是想要使用分布式系统的唯一原因。容错和低延迟（通过将数据放置在地理上靠近用户）是同等重要的目标，而这些目标是不可能用单个节点来实现的。
+
+在这一章我们也突然转换了话题，探讨了网络，时钟和进程的不可靠性是否是不可避免的自然规律。我们发现它不是：可以给网络提供硬实时响应保证和有限的延迟，但是这样做非常昂贵并且导致硬件资源利用率降低。大多数非安全关键系统选择了偏移且不可靠的方案，而不是价格昂贵且可靠的。
+
+我们还谈到了超级计算机，它们采用可靠的组件，因此组件发生故障时就必须完全停止并重新启动。相比之下，分布式系统可以永久运行而服务不会中断，因为所有的故障和维护都可以在节点级别进行处理——至少在理论上是如此。（实际上，如果将错误的配置变更滚动到所有节点，这仍会使分布式系统瘫痪。）
+
+这一章都是关于问题的，给我们带来了一个黯淡的前景。在下一章中，我们将继续讨论解决方案，并讨论一些旨在解决分布式系统中所有问题的算法。
