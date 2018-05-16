@@ -173,3 +173,101 @@
 这个问题之所以出现，是因为Web服务器和编辑器之间有两个不同的通信通道：文件存储和消息队列。没有新近性线性化的保证，两个信道之间的竞争条件是可能的。这种情况类似于图9-1，图中两个通信通道之间也存在竞争条件：数据库复制，以及真实世界里爱丽丝嘴巴到鲍勃耳朵之间的音频通道。
 
 线性化并不是避免这种竞赛条件的唯一方法，却是最容易理解的方式。如果你控制着多余的那条通信通道(比如消息队列的情况，但不是爱丽丝和鲍勃的情况)，你可以使用与我们在“读取自己的写操作”中讨论的类似替代方法，代价是额外的复杂性。
+
+### 实现线性化系统
+
+现在既然我们已经看了几个线性化有用的例子，那么让我们考虑一下如何实现提供线性化语义的系统吧。
+
+由于线性化本质上意味着“表现地就像只有一份数据拷贝，而且对它的所有操作都是原子性的”，那么最简单的答案就是真的只用一份数据拷贝。但是，这种方法将没有办法容错：如果保存该副本的节点失效，数据将丢失，或者至少在节点再次上线之前是无法访问的。
+
+使系统可以容错的最常见方法是使用复制。让我们重新回顾第5章中提到的复制方法，然后比较它们是否可以线性化：
+
+*单主机复制（有可能可以线性化）*
+
+在有着单主机复制的系统中（见“主机与从机”一节），主机拥有用于写入的数据的主副本，而从机在其他节点上维护数据的备份副本。如果您从主机或同步更新的从机中读取数据，那么它们有可能是线性化的。然而，并不是每个单主机数据库实际上都是线性化的，要么是因为设计（比如因为它使用快照隔离），要么是由于并发bug。
+
+使用主机完成读取请求依赖于这样一个假设——你确实知道哪个是主机。正如在“真理由多数人定义”一节中所讨论的那样，节点很有可能认为它是主机，而实际上并非如此——如果妄想的主机继续响应请求，就很可能违反了线性化。使用异步复制，故障转移甚至可能会丢失已经提交的写入操作（见“处理节点离线”一节），这既违反了持久性也违反了线性化。
+
+*协商一致算法（线性化的）*
+
+一些我们将在本章稍后讨论到的协商一致算法，与单主机复制相似。然而，协商一致协议包含了防止裂脑和陈旧复本的措施。正是由于这些细节，协商一致算法可以安全地实现线性化存储。这就是例如ZooKeeper以及etcd的工作方式。
+
+*单主机复制（非线性化的）*
+
+具有多主机复制的系统通常是非线性化的，因为它们同时处理多个节点的写入请求，并异步地将它们复制到其他节点。由于这个原因，它们会产生需要解决的冲突写入请求（见“处理写入冲突”一节）。这种冲突是缺少数据单个拷贝的产物。
+
+*无主机复制（大概不可以线性化）*
+
+对于无主机复制的系统（Dynamo风格；见“无主机复制”一节），人们有时会说通过要求仲裁读写（*w + r > n*）你可以获得“强一致性”。取决于仲裁的确切配置，以及如何定义强一致性，这并不完全正确。
+
+基于现世时钟的“以最后一次写入为准”的冲突解决方法（例如在Cassandra中；见“依赖同步时钟”一节）几乎肯定是非线性化的，因为时钟时间戳不能保证与由于时钟偏斜导致的实际事件顺序一致。草率的仲裁(“草率的定额值与提示交换”一节)也破坏了任何实现线性化的机会。即使有严格的仲裁，还是有可能出现非线性化行为，如下一节所示。
+
+#### Linearizability and quorums
+
+Intuitively, it seems as though strict quorum reads and writes should be linearizable in a Dynamo-style model. However, when we have variable network delays, it is possible to have race conditions, as demonstrated in Figure   9-6.
+
+*Figure 9-6. A nonlinearizable execution, despite using a strict quorum.*
+
+In Figure   9-6, the initial value of x is 0, and a writer client is updating x to 1 by sending the write to all three replicas (n   =   3, w   =   3). Concurrently, client A reads from a quorum of two nodes (r   =   2) and sees the new value 1 on one of the nodes. Also concurrently with the write, client B reads from a different quorum of two nodes, and gets back the old value 0 from both.
+
+The quorum condition is met (w   +   r > n), but this execution is nevertheless not linearizable: B’s request begins after A’s request completes, but B returns the old value while A returns the new value. (It’s once again the Alice and Bob situation from Figure   9-1.) 
+
+Interestingly, it is possible to make Dynamo-style quorums linearizable at the cost of reduced performance: a reader must perform read repair (see “Read repair and anti-entropy”) synchronously, before returning results to the application [23], and a writer must read the latest state of a quorum of nodes before sending its writes [24, 25]. However, Riak does not perform synchronous read repair due to the performance penalty [26]. Cassandra does wait for read repair to complete on quorum reads [27], but it loses linearizability if there are multiple concurrent writes to the same key, due to its use of last-write-wins conflict resolution.
+
+Moreover, only linearizable read and write operations can be implemented in this way; a linearizable compare-and-set operation cannot, because it requires a consensus algorithm [28].
+
+In summary, it is safest to assume that a leaderless system with Dynamo-style replication does not provide linearizability.
+
+#### The Cost of Linearizability
+
+As some replication methods can provide linearizability and others cannot, it is interesting to explore the pros and cons of linearizability in more depth.
+
+We already discussed some use cases for different replication methods in Chapter   5; for example, we saw that multi-leader replication is often a good choice for multi-datacenter replication (see “Multi-datacenter operation”). An example of such a deployment is illustrated in Figure   9-7.
+
+*Figure 9-7. A network interruption forcing a choice between linearizability and availability.*
+
+Consider what happens if there is a network interruption between the two datacenters. Let’s assume that the network within each datacenter is working, and clients can reach the datacenters, but the datacenters cannot connect to each other.
+
+With a multi-leader database, each datacenter can continue operating normally: since writes from one datacenter are asynchronously replicated to the other, the writes are simply queued up and exchanged when network connectivity is restored.
+
+On the other hand, if single-leader replication is used, then the leader must be in one of the datacenters. Any writes and any linearizable reads must be sent to the leader — thus, for any clients connected to a follower datacenter, those read and write requests must be sent synchronously over the network to the leader datacenter.
+
+If the network between datacenters is interrupted in a single-leader setup, clients connected to follower datacenters cannot contact the leader, so they cannot make any writes to the database, nor any linearizable reads. They can still make reads from the follower, but they might be stale (nonlinearizable). If the application requires linearizable reads and writes, the network interruption causes the application to become unavailable in the datacenters that cannot contact the leader.
+
+If clients can connect directly to the leader datacenter, this is not a problem, since the application continues to work normally there. But clients that can only reach a follower datacenter will experience an outage until the network link is repaired.
+
+#### The CAP theorem
+
+This issue is not just a consequence of single-leader and multi-leader replication: any linearizable database has this problem, no matter how it is implemented. The issue also isn’t specific to multi-datacenter deployments, but can occur on any unreliable network, even within one datacenter. The trade-off is as follows:v 
+
+* If your application requires linearizability, and some replicas are disconnected from the other replicas due to a network problem, then some replicas cannot process requests while they are disconnected: they must either wait until the network problem is fixed, or return an error (either way, they become unavailable).
+
+* If your application does not require linearizability, then it can be written in a way that each replica can process requests independently, even if it is disconnected from other replicas (e.g., multi-leader). In this case, the application can remain available in the face of a network problem, but its behavior is not linearizable.
+
+Thus, applications that don’t require linearizability can be more tolerant of network problems. This insight is popularly known as the CAP theorem [29, 30, 31, 32], named by Eric Brewer in 2000, although the trade-off has been known to designers of distributed databases since the 1970s [33, 34, 35, 36].
+
+CAP was originally proposed as a rule of thumb, without precise definitions, with the goal of starting a discussion about trade-offs in databases. At the time, many distributed databases focused on providing linearizable semantics on a cluster of machines with shared storage [18], and CAP encouraged database engineers to explore a wider design space of distributed shared-nothing systems, which were more suitable for implementing large-scale web services [37]. CAP deserves credit for this culture shift — witness the explosion of new database technologies since the mid-2000s (known as NoSQL).
+
+> **The Unhelpful CAP Theorem**
+> 
+> CAP is sometimes presented as Consistency, Availability, Partition tolerance: pick 2 out of 3. Unfortunately, putting it this way is misleading [32] because network partitions are a kind of fault, so they aren’t something about which you have a choice: they will happen whether you like it or not [38].
+>
+> At times when the network is working correctly, a system can provide both consistency (linearizability) and total availability. When a network fault occurs, you have to choose between either linearizability or total availability. Thus, a better way of phrasing CAP would be either Consistent or Available when Partitioned [39]. A more reliable network needs to make this choice less often, but at some point the choice is inevitable.
+>
+> In discussions of CAP there are several contradictory definitions of the term availability, and the formalization as a theorem [30] does not match its usual meaning [40]. Many so-called “highly available” (fault-tolerant) systems actually do not meet CAP’s idiosyncratic definition of availability. All in all, there is a lot of misunderstanding and confusion around CAP, and it does not help us understand systems better, so CAP is best avoided.
+
+The CAP theorem as formally defined [30] is of very narrow scope: it only considers one consistency model (namely linearizability) and one kind of fault (network partitions, vi or nodes that are alive but disconnected from each other). It doesn’t say anything about network delays, dead nodes, or other trade-offs. Thus, although CAP has been historically influential, it has little practical value for designing systems [9, 40].
+
+There are many more interesting impossibility results in distributed systems [41], and CAP has now been superseded by more precise results [2, 42], so it is of mostly historical interest today.
+
+#### Linearizability and network delays
+
+Although linearizability is a useful guarantee, surprisingly few systems are actually linearizable in practice. For example, even RAM on a modern multi-core CPU is not linearizable [43]: if a thread running on one CPU core writes to a memory address, and a thread on another CPU core reads the same address shortly afterward, it is not guaranteed to read the value written by the first thread (unless a memory barrier or fence [44] is used).
+
+The reason for this behavior is that every CPU core has its own memory cache and store buffer. Memory access first goes to the cache by default, and any changes are asynchronously written out to main memory. Since accessing data in the cache is much faster than going to main memory [45], this feature is essential for good performance on modern CPUs. However, there are now several copies of the data (one in main memory, and perhaps several more in various caches), and these copies are asynchronously updated, so linearizability is lost.
+
+Why make this trade-off? It makes no sense to use the CAP theorem to justify the multi-core memory consistency model: within one computer we usually assume reliable communication, and we don’t expect one CPU core to be able to continue operating normally if it is disconnected from the rest of the computer. The reason for dropping linearizability is performance, not fault tolerance.
+
+The same is true of many distributed databases that choose not to provide linearizable guarantees: they do so primarily to increase performance, not so much for fault tolerance [46]. Linearizability is slow — and this is true all the time, not only during a network fault. 
+
+Can’t we maybe find a more efficient implementation of linearizable storage? It seems the answer is no: Attiya and Welch [47] prove that if you want linearizability, the response time of read and write requests is at least proportional to the uncertainty of delays in the network. In a network with highly variable delays, like most computer networks (see “Timeouts and Unbounded Delays”), the response time of linearizable reads and writes is inevitably going to be high. A faster algorithm for linearizability does not exist, but weaker consistency models can be much faster, so this trade-off is important for latency-sensitive systems. In Chapter   12 we will discuss some approaches for avoiding linearizability without sacrificing correctness.
