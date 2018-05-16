@@ -134,42 +134,42 @@
 >
 > 然而，串行化快照隔离（见“串行化快照隔离（SSI）”一节）不是线性化的：根据设计，它从一致快照进行读取，以避免读取器和写入器之间的锁定争用。一致快照的全部要点是，它不包括比快照更近期的写入，因此从快照中读取的内容不是线性化的。
 
-### Relying on Linearizability
+### 依赖线性化
 
-In what circumstances is linearizability useful? Viewing the final score of a sporting match is perhaps a frivolous example: a result that is outdated by a few seconds is unlikely to cause any real harm in this situation. However, there a few areas in which linearizability is an important requirement for making a system work correctly.
+在什么情况下线性化是有用的？查看一场体育比赛的最后比分也许是一个轻率的例子：在这种情况下，比赛结果晚了几秒更新不太可能造成任何真正的伤害。然而，在一些领域线性化是使系统正常工作的重要条件。
 
-#### Locking and leader election
+#### 锁定与主机选举
 
-A system that uses single-leader replication needs to ensure that there is indeed only one leader, not several (split brain). One way of electing a leader is to use a lock: every node that starts up tries to acquire the lock, and the one that succeeds becomes the leader [14]. No matter how this lock is implemented, it must be linearizable: all nodes must agree which node owns the lock; otherwise it is useless. 
+使用单主机复制的系统需要确保确实只有一个主机，而不是多个主机（裂脑）。选举主机的一种方法是使用锁：每一个节点启动的时候都试图获得锁，成功的节点将成为主机。不管这个锁是如何实现的，它必须是线性化的：所有节点都必须同意哪个节点拥有锁；不然没用。
 
-Coordination services like Apache ZooKeeper [15] and etcd [16] are often used to implement distributed locks and leader election. They use consensus algorithms to implement linearizable operations in a fault-tolerant way (we discuss such algorithms later in this chapter, in “Fault-Tolerant Consensus”). iii There are still many subtle details to implementing locks and leader election correctly (see for example the fencing issue in “The leader and the lock”), and libraries like Apache Curator [17] help by providing higher-level recipes on top of ZooKeeper. However, a linearizable storage service is the basic foundation for these coordination tasks.
+像Apache ZooKeyer和etcd这样的协调服务通常用于实现分布式的锁与主机选举。他们使用协商一致算法以容错方式实现线性化操作（我们在本章后面的“容错协商一致”一节中讨论了这些算法）。正确实现锁和主机选举仍然有许多微妙的细节（见比如“主机与锁”中的围栏问题），而诸如Apache Curator这样的库，通过提供基于ZooKeeper的高级解决方案起到帮助作用。然而，线性化的存储服务是这些协调任务的基础。
 
-Distributed locking is also used at a much more granular level in some distributed databases, such as Oracle Real Application Clusters (RAC) [18]. RAC uses a lock per disk page, with multiple nodes sharing access to the same disk storage system. Since these linearizable locks are on the critical path of transaction execution, RAC deployments usually have a dedicated cluster interconnect network for communication between database nodes.
+分布式的锁定也用在一些分布式数据库中的更高粒度级别，例如Oracle Real Application Clusters （RAC）。由于多个节点共享对同一磁盘存储系统的访问，RAC在每个磁盘页上都用到锁。由于这些线性化的锁位于事务执行的关键路径上，因此RAC的部署通常有一个专用的集群互连网络，用于数据库节点之间的通信。
 
-#### Constraints and uniqueness guarantees
+#### 约束与唯一性保证
 
-Uniqueness constraints are common in databases: for example, a username or email address must uniquely identify one user, and in a file storage service there cannot be two files with the same path and filename. If you want to enforce this constraint as the data is written (such that if two people try to concurrently create a user or a file with the same name, one of them will be returned an error), you need linearizability. 
+唯一性约束在数据库中是很常见的：例如，用户名或电子邮件地址必须唯一地标识一个用户，而在文件存储服务中，不可能有两个路径和文件名相同的文件。如果要在写入数据时强制执行这个约束（如果两个人试图同时用同样的名字创建用户或者文件，其中一个将被返回错误），你需要线性化。
 
-This situation is actually similar to a lock: when a user registers for your service, you can think of them acquiring a “lock” on their chosen username. The operation is also very similar to an atomic compare-and-set, setting the username to the ID of the user who claimed it, provided that the username is not already taken.
+这种情况实际上与锁类似：当用户注册你的服务时，您可以想象成他们获得了他们选择的用户名上的“锁”。这个操作也非常类似原子性的比较后设置，如果用户名没有被占用，就把这个用户名设为申请该用户名用户的ID。
 
-Similar issues arise if you want to ensure that a bank account balance never goes negative, or that you don’t sell more items than you have in stock in the warehouse, or that two people don’t concurrently book the same seat on a flight or in a theater. These constraints all require there to be a single up-to-date value (the account balance, the stock level, the seat occupancy) that all nodes agree on.
+如果你想确保银行账户余额不会为负数，或者你不会卖出比仓库库存更多的物品，或者两个人不会同时在飞机上或剧院里预订相同的座位，就会出现类似的问题。这些约束都要求有一个所有节点都同意的最新值（帐户余额、库存水平、座位是否占用）。
 
-In real applications, it is sometimes acceptable to treat such constraints loosely (for example, if a flight is overbooked, you can move customers to a different flight and offer them compensation for the inconvenience). In such cases, linearizability may not be needed, and we will discuss such loosely interpreted constraints in “Timeliness and Integrity”.
+在实际应用中，宽泛地对待这些约束有时是可以接受的（例如，如果航班超订，你可以把客人转移至不同的航班，并为带来的不便之处向他们进行赔偿）。在这种情况下，线性化也许不需要，我们会在“及时性和完整性”一节讨论这种的被宽泛解读的约束。
 
-However, a hard uniqueness constraint, such as the one you typically find in relational databases, requires linearizability. Other kinds of constraints, such as foreign key or attribute constraints, can be implemented without requiring linearizability [19].
+但是，硬唯一性约束，例如通常在关系型数据库中找到的那种，需要线性化。其他类型的约束，例如外键或属性约束，不需要线性化的情况下就可以实现。
 
-#### Cross-channel timing dependencies
+#### 跨通道时序依赖
 
-Notice a detail in Figure   9-1: if Alice hadn’t exclaimed the score, Bob wouldn’t have known that the result of his query was stale. He would have just refreshed the page again a few seconds later, and eventually seen the final score. The linearizability violation was only noticed because there was an additional communication channel in the system (Alice’s voice to Bob’s ears).
+注意图9-1中的一个细节：如果爱丽丝没有报出分数，鲍勃就不会知道他的查询结果已经过时了。几秒钟后，他就会再次刷新页面，并最终看到了最后的比分。只有在系统中有另一条通信通道（爱丽丝的声音对到鲍勃的耳朵），才会注意到这种线性化违规。
 
-Similar situations can arise in computer systems. For example, say you have a website where users can upload a photo, and a background process resizes the photos to lower resolution for faster download (thumbnails). The architecture and dataflow of this system is illustrated in Figure   9-5.
+计算机系统中也可能出现类似的情况。例如，假设你有一个网站，用户可以上传照片，背景进程调整照片大小到较低分辨率以便更快地下载（缩略图）。该系统的架构和数据流如图9-5所示.
 
-The image resizer needs to be explicitly instructed to perform a resizing job, and this instruction is sent from the web server to the resizer via a message queue (see Chapter   11). The web server doesn’t place the entire photo on the queue, since most message brokers are designed for small messages, and a photo may be several megabytes in size. Instead, the photo is first written to a file storage service, and once the write is complete, the instruction to the resizer is placed on the queue.
+需要显式地指示图像编辑器执行调整大小的任务，并且通过消息队列将此指令从Web服务器发送到编辑器（见第11章）。Web服务器不会将整个照片放在队列中，因为大多数消息代理都是专为小消息设计的，而一张照片的大小可能是几兆字节。取而代之的是，照片首先被写到文件存储服务中，一旦写入完成，给编辑器的指令就会放在队列上。
 
-*Figure 9-5. The web server and image resizer communicate both through file storage and a message queue, opening the potential for race conditions.*
+*图9-5 Web服务器和图像编辑器通过文件存储和消息队列进行通信，从而打开了竞争条件的潜在可能性。*
 
-If the file storage service is linearizable, then this system should work fine. If it is not linearizable, there is the risk of a race condition: the message queue (steps 3 and 4 in Figure   9-5) might be faster than the internal replication inside the storage service. In this case, when the resizer fetches the image (step 5), it might see an old version of the image, or nothing at all. If it processes an old version of the image, the full-size and resized images in the file storage become permanently inconsistent.
+如果文件存储服务是线性化的，那么这个系统应该可以正常工作。如果消息队列不是线性化的，就有存在竞争条件的风险：消息队列（图9-5中的步骤3和步骤4）可能比存储服务中的内部复制的速度更快。在这种情况下，当编辑器获取图像（步骤5）时，它可能会看到图像的旧版本，或者什么也看不到。如果它处理图像的旧版本，则文件存储中的全尺寸的图片和大小调整后的图片就不一致了。
 
-This problem arises because there are two different communication channels between the web server and the resizer: the file storage and the message queue. Without the recency guarantee of linearizability, race conditions between these two channels are possible. This situation is analogous to Figure   9-1, where there was also a race condition between two communication channels: the database replication and the real-life audio channel between Alice’s mouth and Bob’s ears. 
+这个问题之所以出现，是因为Web服务器和编辑器之间有两个不同的通信通道：文件存储和消息队列。没有新近性线性化的保证，两个信道之间的竞争条件是可能的。这种情况类似于图9-1，图中两个通信通道之间也存在竞争条件：数据库复制，以及真实世界里爱丽丝嘴巴到鲍勃耳朵之间的音频通道。
 
-Linearizability is not the only way of avoiding this race condition, but it’s the simplest to understand. If you control the additional communication channel (like in the case of the message queue, but not in the case of Alice and Bob), you can use alternative approaches similar to what we discussed in “Reading Your Own Writes”, at the cost of additional complexity.
+线性化并不是避免这种竞赛条件的唯一方法，却是最容易理解的方式。如果你控制着多余的那条通信通道(比如消息队列的情况，但不是爱丽丝和鲍勃的情况)，你可以使用与我们在“读取自己的写操作”中讨论的类似替代方法，代价是额外的复杂性。
