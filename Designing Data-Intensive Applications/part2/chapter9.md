@@ -202,39 +202,39 @@
 
 基于现世时钟的“以最后一次写入为准”的冲突解决方法（例如在Cassandra中；见“依赖同步时钟”一节）几乎肯定是非线性化的，因为时钟时间戳不能保证与由于时钟偏斜导致的实际事件顺序一致。草率的仲裁(“草率的定额值与提示交换”一节)也破坏了任何实现线性化的机会。即使有严格的仲裁，还是有可能出现非线性化行为，如下一节所示。
 
-#### Linearizability and quorums
+#### 线性化和仲裁
 
-Intuitively, it seems as though strict quorum reads and writes should be linearizable in a Dynamo-style model. However, when we have variable network delays, it is possible to have race conditions, as demonstrated in Figure   9-6.
+从直觉上看，似乎严格的仲裁读写应该在Dynamo风格的模型中是线性化的。然而，当我们有可变的网络延迟时，就有可能有竞争条件，如图9-6所示。
 
-*Figure 9-6. A nonlinearizable execution, despite using a strict quorum.*
+*图9-6 非线性化的执行，尽管使用了严格的仲裁。*
 
-In Figure   9-6, the initial value of x is 0, and a writer client is updating x to 1 by sending the write to all three replicas (n   =   3, w   =   3). Concurrently, client A reads from a quorum of two nodes (r   =   2) and sees the new value 1 on one of the nodes. Also concurrently with the write, client B reads from a different quorum of two nodes, and gets back the old value 0 from both.
+在图9-6中，*x*的初始值是0，并且写入器客户端通过将写入请求发送到所有三个副本（*n*＝3，*w*＝3）把*x*更新到1。同时，客户端A从两个节点的仲裁团中读取（*r* = 2），并且在其中一个节点上看到新值1。同时在写入过程中，客户端B从两个节点构成的另一个仲裁团中读取，并且从这两个节点取回旧值0。
 
-The quorum condition is met (w   +   r > n), but this execution is nevertheless not linearizable: B’s request begins after A’s request completes, but B returns the old value while A returns the new value. (It’s once again the Alice and Bob situation from Figure   9-1.) 
+仲裁条件（*w + r > n*）是满足了，但这种执行仍然不是线性化的：B的请求是在A的请求完成后开始的，但是B返回旧值的同时A返回了新值。（这又是图9-1中的爱丽丝和鲍勃的情况。）
 
-Interestingly, it is possible to make Dynamo-style quorums linearizable at the cost of reduced performance: a reader must perform read repair (see “Read repair and anti-entropy”) synchronously, before returning results to the application [23], and a writer must read the latest state of a quorum of nodes before sending its writes [24, 25]. However, Riak does not perform synchronous read repair due to the performance penalty [26]. Cassandra does wait for read repair to complete on quorum reads [27], but it loses linearizability if there are multiple concurrent writes to the same key, due to its use of last-write-wins conflict resolution.
+有趣的是，可以在牺牲性能的情况下使Dynamo风格的仲裁线性化：在将结果返回到应用程序之前，读取器必须同步执行读修复（见“读取修复与反熵”一节），而编写器必须在发送其写入请求之前读取仲裁团节点的最新状态。然而由于性能损失，Riak不执行同步的读取修复。Cassandra确实在仲裁读取时等待读取修复完成，但是如果对相同的键有多个并发写入，就会失去线性化，因为它使用了以最后一次写入为准的冲突解决方案。
 
-Moreover, only linearizable read and write operations can be implemented in this way; a linearizable compare-and-set operation cannot, because it requires a consensus algorithm [28].
+此外，只有线性化的读写操作才能以这种方式实现；线性化的比较后设置操作不能实现，因为它需要协商一致的算法。
 
-In summary, it is safest to assume that a leaderless system with Dynamo-style replication does not provide linearizability.
+总之，最安全的假设是具有Dynamo风格复制的无主机系统不提供线性化。
 
-#### The Cost of Linearizability
+#### 线性化的代价
 
-As some replication methods can provide linearizability and others cannot, it is interesting to explore the pros and cons of linearizability in more depth.
+正是由于一些复制方法可以提供线性化而另一些不能，因此更深入地探讨线性化的利弊是很有意思的。
 
-We already discussed some use cases for different replication methods in Chapter   5; for example, we saw that multi-leader replication is often a good choice for multi-datacenter replication (see “Multi-datacenter operation”). An example of such a deployment is illustrated in Figure   9-7.
+我们已经在第5章中讨论了不同复制方法的一些用例；例如，我们看到多主机复制通常是多数据中心复制的一个很好的选择(见“多数据中心操作”一节)。图9-7展示了这样一个部署的例子。
 
-*Figure 9-7. A network interruption forcing a choice between linearizability and availability.*
+*图9-7 网络中断强制在线性化与可用性之间选择。*
 
-Consider what happens if there is a network interruption between the two datacenters. Let’s assume that the network within each datacenter is working, and clients can reach the datacenters, but the datacenters cannot connect to each other.
+考虑一下如果两个数据中心之间网络中断了会发生什么情况。让我们假设每个数据中心内的网络都在工作，客户端可以访问数据中心，但是数据中心之间不能相互连接。
 
-With a multi-leader database, each datacenter can continue operating normally: since writes from one datacenter are asynchronously replicated to the other, the writes are simply queued up and exchanged when network connectivity is restored.
+使用多主机数据库，每个数据中心可以继续正常工作：由于来自一个数据中心的写入请求被异步地复制到另一个数据中心，因此在网络连接恢复的时侯，只需排起队来等待交换写入操作。
 
-On the other hand, if single-leader replication is used, then the leader must be in one of the datacenters. Any writes and any linearizable reads must be sent to the leader — thus, for any clients connected to a follower datacenter, those read and write requests must be sent synchronously over the network to the leader datacenter.
+另一方面，如果使用单主机复制，那么主机必然位于其中一个数据中心。任何写入和任何可线性读取都必须发送给主机——因此，对于任何连接到从机数据中心的客户端，这些读写请求必须同步地通过网络发送到主机数据中心。
 
-If the network between datacenters is interrupted in a single-leader setup, clients connected to follower datacenters cannot contact the leader, so they cannot make any writes to the database, nor any linearizable reads. They can still make reads from the follower, but they might be stale (nonlinearizable). If the application requires linearizable reads and writes, the network interruption causes the application to become unavailable in the datacenters that cannot contact the leader.
+如果数据中心之间的网络在单主机设置下中断了，连接到从机数据中心的客户端无法与主机取得联系，因此他们不能对数据库发起任何写入请求，也不能发起任何线性化读取请求。他们仍然可以向从机发起读取请求，但数据可能是陈旧的（非线性化的）。如果应用程序需要线性化的读写，那么网络中断将导致应用程序在无法与主机取得联系的数据中心中不可用。
 
-If clients can connect directly to the leader datacenter, this is not a problem, since the application continues to work normally there. But clients that can only reach a follower datacenter will experience an outage until the network link is repaired.
+如果客户端可以直接连接到主机的数据中心，这并不是一个问题，因为应用程序继续在那里正常工作。但是，只能访问从机数据中心的客户端将经历断线，直到（数据中心之间的）网络链接被修复为止。
 
 #### The CAP theorem
 
