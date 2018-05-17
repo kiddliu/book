@@ -236,17 +236,17 @@
 
 如果客户端可以直接连接到主机的数据中心，这并不是一个问题，因为应用程序继续在那里正常工作。但是，只能访问从机数据中心的客户端将经历断线，直到（数据中心之间的）网络链接被修复为止。
 
-#### The CAP theorem
+#### CAP定理
 
-This issue is not just a consequence of single-leader and multi-leader replication: any linearizable database has this problem, no matter how it is implemented. The issue also isn’t specific to multi-datacenter deployments, but can occur on any unreliable network, even within one datacenter. The trade-off is as follows:v 
+这个问题不仅仅是单主机和多主机复制的结果：任何线性化数据库都有这个问题，不管它是如何实现的。这个问题也不限于多数据中心部署，它可能发生在任何不可靠的网络上，甚至在一个数据中心内。权衡如下：
 
-* If your application requires linearizability, and some replicas are disconnected from the other replicas due to a network problem, then some replicas cannot process requests while they are disconnected: they must either wait until the network problem is fixed, or return an error (either way, they become unavailable).
+* 如果你的应用程序需要线性化，并且一些副本由于网络问题而与其他副本断开了连接，于是有些副本在断开连接时无法处理请求：它们必须要么等待网络问题的解决，要么返回错误（无论哪种方式，它们都变得不可用）。
 
-* If your application does not require linearizability, then it can be written in a way that each replica can process requests independently, even if it is disconnected from other replicas (e.g., multi-leader). In this case, the application can remain available in the face of a network problem, but its behavior is not linearizable.
+* 如果你的应用程序不需要线性化，那么可以编写为每个副本都可以独立处理请求，即使它与其他副本（例如多主机）断开连接。在这种情况下，即使面对网络问题应用程序仍然可用，只是它的行为不是线性化的。
 
-Thus, applications that don’t require linearizability can be more tolerant of network problems. This insight is popularly known as the CAP theorem [29, 30, 31, 32], named by Eric Brewer in 2000, although the trade-off has been known to designers of distributed databases since the 1970s [33, 34, 35, 36].
+因此，不需要线性化的应用程序可以更好地容忍网络问题。这种洞察力被通称为CAP定理，由埃里克·布鲁尔于2000年命名，尽管自20世纪70年代以来分布式数据库的设计者就知道了这种取舍。
 
-CAP was originally proposed as a rule of thumb, without precise definitions, with the goal of starting a discussion about trade-offs in databases. At the time, many distributed databases focused on providing linearizable semantics on a cluster of machines with shared storage [18], and CAP encouraged database engineers to explore a wider design space of distributed shared-nothing systems, which were more suitable for implementing large-scale web services [37]. CAP deserves credit for this culture shift — witness the explosion of new database technologies since the mid-2000s (known as NoSQL).
+CAP最初是作为经验法则提出的，没有准确的定义，目的是为了开始讨论数据库中的取舍问题。当时，许多分布式数据库专注于在具有共享存储的设备集群上提供可线性化的语义[18]，CAP则鼓励数据库工程师探索更广泛的分布式无共享系统的设计空间，这些系统更适合用于实现大规模Web服务。CAP值得称赞的地方是这种文化的转变——见证了自2000年代中期以来新数据库技术的爆发（也就是NoSQL）。
 
 > **The Unhelpful CAP Theorem**
 > 
