@@ -248,17 +248,17 @@
 
 CAP最初是作为经验法则提出的，没有准确的定义，目的是为了开始讨论数据库中的取舍问题。当时，许多分布式数据库专注于在具有共享存储的设备集群上提供可线性化的语义[18]，CAP则鼓励数据库工程师探索更广泛的分布式无共享系统的设计空间，这些系统更适合用于实现大规模Web服务。CAP值得称赞的地方是这种文化的转变——见证了自2000年代中期以来新数据库技术的爆发（也就是NoSQL）。
 
-> **The Unhelpful CAP Theorem**
-> 
-> CAP is sometimes presented as Consistency, Availability, Partition tolerance: pick 2 out of 3. Unfortunately, putting it this way is misleading [32] because network partitions are a kind of fault, so they aren’t something about which you have a choice: they will happen whether you like it or not [38].
+> **没有用处的CAP定理**
 >
-> At times when the network is working correctly, a system can provide both consistency (linearizability) and total availability. When a network fault occurs, you have to choose between either linearizability or total availability. Thus, a better way of phrasing CAP would be either Consistent or Available when Partitioned [39]. A more reliable network needs to make this choice less often, but at some point the choice is inevitable.
+> CAP有时会表示为*一致性、可用性、分区耐受性：从3项中选择2项*。然而，这样说会误导人，因为网络分区是一种故障，所以它们不是你有的选的东西：不管喜欢与否它们都会发生。
 >
-> In discussions of CAP there are several contradictory definitions of the term availability, and the formalization as a theorem [30] does not match its usual meaning [40]. Many so-called “highly available” (fault-tolerant) systems actually do not meet CAP’s idiosyncratic definition of availability. All in all, there is a lot of misunderstanding and confusion around CAP, and it does not help us understand systems better, so CAP is best avoided.
+> 当网络正常工作时，系统可以提供一致性（线性化）和完全可用性。当网络发生故障时，你必须在线性化或完全可用性之间进行选择。因此，描述CAP更好的方法是*网络分区时要么有一致性要么有可用性*。更可靠的网络可以降低选择的频率，但在某些时候这种选择是不可避免的。
+>
+> 在CAP的讨论中，对于术语*可用性*有几个相互矛盾的定义，而形式化为定理[30]并不符合其通常的含义。许多所谓的“高度可用”（容错）的系统实际上不符合CAP对可用性的独具一格的定义。总之，围绕CAP存在许多误解和困惑，它不能帮助我们更好地理解系统，所以最好避免CAP。
 
-The CAP theorem as formally defined [30] is of very narrow scope: it only considers one consistency model (namely linearizability) and one kind of fault (network partitions, vi or nodes that are alive but disconnected from each other). It doesn’t say anything about network delays, dead nodes, or other trade-offs. Thus, although CAP has been historically influential, it has little practical value for designing systems [9, 40].
+正式定义的CAP定理范围很窄：它只考虑一个一致性模型（即线性化）和一种故障（*网络分区*，或者在线但是与其它节点断开的节点）。它没有提到任何关于网络延迟、离线节点或其他取舍的内容。因此，虽然CAP在历史上具有影响力，但它对系统的设计没有什么实际价值。
 
-There are many more interesting impossibility results in distributed systems [41], and CAP has now been superseded by more precise results [2, 42], so it is of mostly historical interest today.
+在分布式系统中有许多更有趣的不可能的结果，而CAP现在已经被更精确的结果所取代，因此它在今天更具有历史意义一些。
 
 #### Linearizability and network delays
 
