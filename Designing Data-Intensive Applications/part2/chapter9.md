@@ -374,17 +374,15 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 * 您可以预先分配序列号块。例如，节点A可能要求从1到1，000之间的序列号块，而节点B可能要求从1，001到2，000之间的块。然后每个节点可以独立地从各自的块分配序列号，并在可用序号减少时分配到一个新块。
 
-这三个选项都比把所有操作通过递增计数器的单主机者推动所有操作更具伸缩性。它们为每个操作生成一个唯一的、近似增加的序列号。然而，它们都有一个问题：它们产生的序列号与因果关系不一致。
+相比于把所有的操作都推送到单主机从而使计数器加一，这三个选项执行效果更好，也更具有伸缩性。它们为每个操作生成一个唯一的、近似增加的序列号。然而，它们都有一个问题：它们产生的序列号与因果关系不一致。
 
-These three options all perform better and are more scalable than pushing all operations through a single leader that increments a counter. They generate a unique, approximately increasing sequence number for each operation. However, they all have a problem: the sequence numbers they generate are not consistent with causality.
+之所以会出现因果关系问题，是因为这些序列号生成器无法正确捕获不同节点之间操作的顺序：
 
-The causality problems occur because these sequence number generators do not correctly capture the ordering of operations across different nodes:
+* 每个节点每一秒可以处理不同数量的操作。因此，如果一个节点产生偶数而另一个节点产生奇数，偶数计数器可能落后于奇数的计数器，抑或反之。如果你有一个奇数的运算和偶数的运算，你并不能准确地分辨出哪一个是先发生的。
 
-* Each node may process a different number of operations per second. Thus, if one node generates even numbers and the other generates odd numbers, the counter for even numbers may lag behind the counter for odd numbers, or vice versa. If you have an odd-numbered operation and an even-numbered operation, you cannot accurately tell which one causally happened first.
+* 来自物理时钟的时间戳受时钟偏差的影响，这可能使它们与因果关系不一致。例如图8-3，其中显示了一个场景，在该场景中因果关系中稍后发生的操作实际上被分配了一个较低的时间戳。
 
-* Timestamps from physical clocks are subject to clock skew, which can make them inconsistent with causality. For example, see Figure   8-3, which shows a scenario in which an operation that happened causally later was actually assigned a lower timestamp.viii
-
-* In the case of the block allocator, one operation may be given a sequence number in the range from 1,001 to 2,000, and a causally later operation may be given a number in the range from 1 to 1,000. Here, again, the sequence number is inconsistent with causality.
+* 在块分配器的情况下，可以给一个操作在1001到2000的范围内的序列号，而随后的操作可以给出范围为1到1000的数字。在这里同样的，序列号与因果关系不一致。
 
 #### Lamport timestamps
 
