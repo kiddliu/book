@@ -352,27 +352,29 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 为了确定因果顺序，数据库需要知道应用程序读取了哪个版本的数据。这就是为什么在图5-13中，之前操作的版本号在写入时被传回数据库的原因。在SSI的冲突检测中也出现了类似的想法，正如在“可串行化快照隔离（SSI）”一节中所讨论的那样：当一个事务想要提交时，数据库检查它读取的数据版本是否仍然是最新的。为此，数据库会跟踪记录哪个数据被哪个事务读取了。
 
-### Sequence Number Ordering
+### 序号排序
 
-Although causality is an important theoretical concept, actually keeping track of all causal dependencies can become impractical. In many applications, clients read lots of data before writing something, and then it is not clear whether the write is causally dependent on all or only some of those prior reads. Explicitly tracking all the data that has been read would mean a large overhead.
+虽然因果关系是一个重要的理论概念，但实际上，跟踪记录所有的因果关系是不切实际的。在许多应用程序中，客户端在写入某些内容之前会读取大量数据，然而并不清楚写入请求是否因果依赖于先前的所有还是部分读取请求。明确地跟踪记录已读取的所有数据意味着很大的开销。
 
-However, there is a better way: we can use sequence numbers or timestamps to order events. A timestamp need not come from a time-of-day clock (or physical clock, which have many problems, as discussed in “Unreliable Clocks”). It can instead come from a logical clock, which is an algorithm to generate a sequence of numbers to identify operations, typically using counters that are incremented for every operation.
+然而，有更好的方法：我们可以使用序列号或时间戳对事件排序。时间戳不需要来自现世时钟（或物理时钟，它有许多在“不可靠的时钟”一节讨论到的问题）。取而代之的是逻辑时钟，它是一种生成数字序列从而标识操作的算法，通常使用计数器，每当发生一个操作就增加一。
 
-Such sequence numbers or timestamps are compact (only a few bytes in size), and they provide a total order: that is, every operation has a unique sequence number, and you can always compare two sequence numbers to determine which is greater (i.e., which operation happened later). 
+这样的序列号或时间戳很紧凑（只有几个字节的大小），并且它们提供了全序：即，每个操作都有唯一的序列号，并且总是可以比较两个序列号来确定哪个更大（即，哪个操作发生得更晚）。
 
-In particular, we can create sequence numbers in a total order that is consistent with causality:vii we promise that if operation A causally happened before B, then A occurs before B in the total order (A has a lower sequence number than B). Concurrent operations may be ordered arbitrarily. Such a total order captures all the causality information, but also imposes more ordering than strictly required by causality.
+特别是，我们可以按照与因果关系一致的全序构建序列号：我们承诺，如果操作A发生在B之前，则A在全序中出现在B之前（A的序列号低于B）。并发操作可以任意地排序。这样的全序包含了所有的因果关系信息，但也强加了比因果关系更严格要求的次序。
 
-In a database with single-leader replication (see “Leaders and Followers”), the replication log defines a total order of write operations that is consistent with causality. The leader can simply increment a counter for each operation, and thus assign a monotonically increasing sequence number to each operation in the replication log. If a follower applies the writes in the order they appear in the replication log, the state of the follower is always causally consistent (even if it is lagging behind the leader).
+在具有单主机复制（见“主机与从机”一节）的数据库中，复制日志定义了与因果性一致的写入操作全序。主机只用为每个操作递增计数器，从而为复制日志中的每个操作分配单调递增的序列号。如果从机按照在复制日志中出现的顺序应用写入，那么从机的状态总是因果一致的（即使状态落后于主机）。
 
-#### Noncausal sequence number generators
+#### 非因果序列号生成器
 
-If there is not a single leader (perhaps because you are using a multi-leader or leaderless database, or because the database is partitioned), it is less clear how to generate sequence numbers for operations. Various methods are used in practice:
+如果不是单主机(也许是因为你在使用的是多主机或无主机的数据库，或者因为数据库是分了区的)，那么如何为操作生成序列号就不那么清楚了。那么在实践中，用到了各种各样的方法：
 
-* Each node can generate its own independent set of sequence numbers. For example, if you have two nodes, one node can generate only odd numbers and the other only even numbers. In general, you could reserve some bits in the binary representation of the sequence number to contain a unique node identifier, and this would ensure that two different nodes can never generate the same sequence number.
+* 每个节点可以生成自己独立的序列号集合。比如说，如果有两个节点，一个节点只能生成奇数，而另一个节点只能生成偶数。通常，你可以在序列号的二进制表示中保留一些位，以包含唯一的节点标识符，这样可以确保两个不同的节点永远不会生成相同的序列号。
 
-* You can attach a timestamp from a time-of-day clock (physical clock) to each operation [55]. Such timestamps are not sequential, but if they have sufficiently high resolution, they might be sufficient to totally order operations. This fact is used in the last write wins conflict resolution method (see “Timestamps for ordering events”).
+* 您可以为每一个操作附加来自现世时钟（物理时钟）的时间戳。这样的时间戳并不是连续的，但是如果它们具有足够高的精度，它们可能就足以完全全序操作。在以最后一次写入为准的冲突解决方法中用到了这个事实（见“为事件排序的时间戳”一节）。
 
-* You can preallocate blocks of sequence numbers. For example, node A might claim the block of sequence numbers from 1 to 1,000, and node B might claim the block from 1,001 to 2,000. Then each node can independently assign sequence numbers from its block, and allocate a new block when its supply of sequence numbers begins to run low.
+* 您可以预先分配序列号块。例如，节点A可能要求从1到1，000之间的序列号块，而节点B可能要求从1，001到2，000之间的块。然后每个节点可以独立地从各自的块分配序列号，并在可用序号减少时分配到一个新块。
+
+这三个选项都比把所有操作通过递增计数器的单主机者推动所有操作更具伸缩性。它们为每个操作生成一个唯一的、近似增加的序列号。然而，它们都有一个问题：它们产生的序列号与因果关系不一致。
 
 These three options all perform better and are more scalable than pushing all operations through a single leader that increments a counter. They generate a unique, approximately increasing sequence number for each operation. However, they all have a problem: the sequence numbers they generate are not consistent with causality.
 
