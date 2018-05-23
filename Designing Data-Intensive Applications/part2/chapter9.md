@@ -384,63 +384,63 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 * 在块分配器的情况下，可以给一个操作在1001到2000的范围内的序列号，而随后的操作可以给出范围为1到1000的数字。在这里同样的，序列号与因果关系不一致。
 
-#### Lamport timestamps
+#### 兰波特时间戳
 
-Although the three sequence number generators just described are inconsistent with causality, there is actually a simple method for generating sequence numbers that is consistent with causality. It is called a Lamport timestamp, proposed in 1978 by Leslie Lamport [56], in what is now one of the most-cited papers in the field of distributed systems.
+虽然刚才描述的三个序列号生成器与因果关系不一致，但是实际上*有*一种与因果关系相一致的简单的序列号生成方法。它被称为*兰波特时间戳*，由莱斯利·兰波特于1978年提出，现在是分布式系统领域中被引用最多的论文之一。
 
-The use of Lamport timestamps is illustrated in Figure   9-8. Each node has a unique identifier, and each node keeps a counter of the number of operations it has processed. The Lamport timestamp is then simply a pair of (counter, node ID). Two nodes may sometimes have the same counter value, but by including the node ID in the timestamp, each timestamp is made unique.
+兰波特时间戳的使用如图9-8所示。每个节点都有一个唯一的标识符，每个节点都有一个记录了它处理了的操作数的计数器。兰波特时间戳只是一对（*计数器，节点ID*）。两个节点有时可能有相同的计数器值，但是通过在时间戳中包含节点ID，每个时间戳都是唯一的。
 
-*Figure 9-8. Lamport timestamps provide a total ordering consistent with causality.*
+*图9-8 兰波特时间戳提供了与因果关系一致的全序。*
 
-A Lamport timestamp bears no relationship to a physical time-of-day clock, but it provides total ordering: if you have two timestamps, the one with a greater counter value is the greater timestamp; if the counter values are the same, the one with the greater node ID is the greater timestamp.
+兰波特时间戳与物理现世时钟没有关系，但它提供了全序：如果你有两个时间戳，那么计数器值越大，时间戳越大；如果计数器值相同，那么节点ID越大，时间戳就越大。
 
-So far this description is essentially the same as the even/ odd counters described in the last section. The key idea about Lamport timestamps, which makes them consistent with causality, is the following: every node and every client keeps track of the maximum counter value it has seen so far, and includes that maximum on every request. When a node receives a request or response with a maximum counter value greater than its own counter value, it immediately increases its own counter to that maximum.
+到目前为止，这种描述基本上与上一节中描述的偶数/奇数计数器相同。兰波特时间戳的关键思想是：每个节点和每个客户端都跟踪记录它到目前为止看到的最大计数器值，并在每个请求中包含这个最大值。当节点接收到最大计数器值大于其自身计数器值的请求或响应时，它立即将自己的计数器增大到最大。
 
-This is shown in Figure   9-8, where client A receives a counter value of 5 from node 2, and then sends that maximum of 5 to node 1. At that time, node 1’ s counter was only 1, but it was immediately moved forward to 5, so the next operation had an incremented counter value of 6.
+如图9-8所示，客户端A从节点2接收计数器值5，然后将最大值5发送给节点1。那时节点1的计数器只有1，但它立即向前移动到5，因此下一次操作的计数器值递增为6。
 
-As long as the maximum counter value is carried along with every operation, this scheme ensures that the ordering from the Lamport timestamps is consistent with causality, because every causal dependency results in an increased timestamp.
+只要在每次操作中都携带最大计数器值，这个方案就能确保来自兰波特时间戳的排序与因果关系一致，因为每个因果依赖关系都会导致时间戳的变大。
 
-Lamport timestamps are sometimes confused with version vectors, which we saw in “Detecting Concurrent Writes”. Although there are some similarities, they have a different purpose: version vectors can distinguish whether two operations are concurrent or whether one is causally dependent on the other, whereas Lamport timestamps always enforce a total ordering. From the total ordering of Lamport timestamps, you cannot tell whether two operations are concurrent or whether they are causally dependent. The advantage of Lamport timestamps over version vectors is that they are more compact.
+兰波特时间戳有时会与我们在“检测并发写入”一节中看到的版本向量相混淆。虽然它们有一些相似之处，但它们有一个不同的目的：版本向量可以区分两个操作是并发的还是一个是因果依赖的，而兰波特时间戳总是强制执行总排序。从兰波特时间戳的总排序中，您无法判断两个操作是并发的还是因果相关的。兰波特时间戳相对于版本向量的优点是它们更紧凑。
 
-#### Timestamp ordering is not sufficient
+#### 时间戳排序是不够的
 
-Although Lamport timestamps define a total order of operations that is consistent with causality, they are not quite sufficient to solve many common problems in distributed systems.
+尽管兰波特时间戳定义了与因果关系一致的操作的全序，但是它们并不完全足以解决分布式系统中的许多常见问题。
 
-For example, consider a system that needs to ensure that a username uniquely identifies a user account. If two users concurrently try to create an account with the same username, one of the two should succeed and the other should fail. (We touched on this problem previously in “The leader and the lock”.)
+例如，考虑需要确保用户名唯一标识用户帐户的系统。如果两个用户同时尝试创建具有相同用户名的帐户，那么两个用户中的一个应该成功另一个应该失败。（我们之前在“主机与锁”中提到过这个问题。）
 
-At first glance, it seems as though a total ordering of operations (e.g., using Lamport timestamps) should be sufficient to solve this problem: if two accounts with the same username are created, pick the one with the lower timestamp as the winner (the one who grabbed the username first), and let the one with the greater timestamp fail. Since timestamps are totally ordered, this comparison is always valid.
+乍一看，似乎全序操作(例如，使用兰波特时间戳)就足以解决这个问题：如果创建了两个具有相同用户名的帐户，则选择具有较低时间戳的帐户作为赢家(先获取用户名的帐户)，然后让具有较大时间戳的帐户失败。由于时间戳是全序的，这种比较总是有效的。
 
-This approach works for determining the winner after the fact: once you have collected all the username creation operations in the system, you can compare their timestamps. However, it is not sufficient when a node has just received a request from a user to create a username, and needs to decide right now whether the request should succeed or fail. At that moment, the node does not know whether another node is concurrently in the process of creating an account with the same username, and what timestamp that other node may assign to the operation.
+这种方法适用于事后确定赢家：一旦收集了系统中所有的用户名创建操作，你就可以比较它们的时间戳了。但是，当节点刚刚收到用户创建用户名的请求，并且需要立即决定请求是成功还是失败时，这是不够的。此时，这个节点不知道另一个节点是否同时正在创建一个具有相同用户名的帐户，也不知道另外那个节点可能为该操作分配的时间戳是什么。
 
-In order to be sure that no other node is in the process of concurrently creating an account with the same username and a lower timestamp, you would have to check with every other node to see what it is doing [56]. If one of the other nodes has failed or cannot be reached due to a network problem, this system would grind to a halt. This is not the kind of fault-tolerant system that we need.
+为了确保没有其他节点在并发创建具有相同用户名和较低时间戳的帐户的过程中，您必须检查其他节点，看看它们正在做什么。如果其他节点中的一个由于网络问题而失败或无法到达，该系统将陷入瘫痪。这不是我们需要的那种容错系统。
 
-The problem here is that the total order of operations only emerges after you have collected all of the operations. If another node has generated some operations, but you don’t yet know what they are, you cannot construct the final ordering of operations: the unknown operations from the other node may need to be inserted at various positions in the total order.
+问题是只有在收集了所有操作之后，操作的全序才会出现。如果另一个节点生成了一些操作，但你还不知道它们是什么，那么就无法构造操作的最终顺序：这些来自另一个节点的未知操作可能需要按全序插入在不同位置。
 
-To conclude: in order to implement something like a uniqueness constraint for usernames, it’s not sufficient to have a total ordering of operations — you also need to know when that order is finalized. If you have an operation to create a username, and you are sure that no other node can insert a claim for the same username ahead of your operation in the total order, then you can safely declare the operation successful.
+总结一下：为了实现关于用户名的唯一性约束，只有操作的全序是不够的——你还需要知道排序何时完成。如果您有一个创建用户名的操作，并且您确信没有其他节点能够在操作之前按全序插入相同用户名的声明，那么您可以安全地声明操作成功。
 
-This idea of knowing when your total order is finalized is captured in the topic of total order broadcast.
+知道全序何时完成的这个理念正是全序广播的主题。
 
-### Total Order Broadcast
+### 全序广播
 
-If your program runs only on a single CPU core, it is easy to define a total ordering of operations: it is simply the order in which they were executed by the CPU. However, in a distributed system, getting all nodes to agree on the same total ordering of operations is tricky. In the last section we discussed ordering by timestamps or sequence numbers, but found that it is not as powerful as single-leader replication (if you use timestamp ordering to implement a uniqueness constraint, you cannot tolerate any faults).
+如果你的程序只运行在在单个CPU核心上，那么定义操作的全序是很简单的：这就是CPU执行它们的顺序。然而，在分布式系统中，让所有节点都同意相同的操作顺序是很困难的。在最后一节中我们讨论了按时间戳或序列号排序，但发现它不如单主机复制（如果使用时间戳排序来实现唯一性约束，则不能容忍任何错误）强大。
 
-As discussed, single-leader replication determines a total order of operations by choosing one node as the leader and sequencing all operations on a single CPU core on the leader. The challenge then is how to scale the system if the throughput is greater than a single leader can handle, and also how to handle failover if the leader fails (see “Handling Node Outages”). In the distributed systems literature, this problem is known as total order broadcast or atomic broadcast [25, 57, 58]. ix
+我们之前讨论过，单主机复制通过选择一个节点作为主机并把所有的操作排列在主机的单个CPU核心上来决定操作的全序的。接下来的挑战是，如果吞吐量超过单个主机可以处理的量应该如何缩放系统，以及如果主机失败如何处理故障转移（见“处理节点中断”一节）。在分布式系统的文献中，这个问题被称为全序广播或原子广播。
 
-> Scope of ordering guarantee
+> 排序保证的范围
 >
-> Partitioned databases with a single leader per partition often maintain ordering only per partition, which means they cannot offer consistency guarantees (e.g., consistent snapshots, foreign key references) across partitions. Total ordering across all partitions is possible, but requires additional coordination [59].
+> 每个分区只有单主机的分区数据库通常只维护每个分区的顺序，这意味着它们不能提供跨分区的一致性保证(例如，一致快照、外键引用)。实现跨所有分区的全序是可能的，但需要额外的协调工作。
 
-Total order broadcast is usually described as a protocol for exchanging messages between nodes. Informally, it requires that two safety properties always be satisfied:
+全序广播通常被描述为用于节点之间交换消息的协议。它非正式地要求两个安全属性必须总是满足：
 
-Reliable delivery
+可靠地送达
 
-No messages are lost: if a message is delivered to one node, it is delivered to all nodes.
+消息不会丢失：如果一个消息被传递到一个节点，那么说明它被传递到了所有节点。
 
-Totally ordered delivery
+全序地送达
 
-Messages are delivered to every node in the same order.
+消息以相同的顺序传递给每个节点。
 
-A correct algorithm for total order broadcast must ensure that the reliability and ordering properties are always satisfied, even if a node or the network is faulty. Of course, messages will not be delivered while the network is interrupted, but an algorithm can keep retrying so that the messages get through when the network is eventually repaired (and then they must still be delivered in the correct order).
+正确的全序广播算法必须确保可靠性和排序属性总是满足的，即使节点或网络有故障。当然，网络中断的时候消息无法传递，但是算法可以继续重试，这样当网络最终被修复时，消息就会传递过去（并且它们仍然必须以正确的顺序送达）。
 
 #### Using total order broadcast
 
