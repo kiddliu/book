@@ -442,39 +442,41 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 正确的全序广播算法必须确保可靠性和排序属性总是满足的，即使节点或网络有故障。当然，网络中断的时候消息无法传递，但是算法可以继续重试，这样当网络最终被修复时，消息就会传递过去（并且它们仍然必须以正确的顺序送达）。
 
-#### Using total order broadcast
+#### 使用全序广播
 
-Consensus services such as ZooKeeper and etcd actually implement total order broadcast. This fact is a hint that there is a strong connection between total order broadcast and consensus, which we will explore later in this chapter.
+协商一致服务，比如ZooKeeper和etcd，实际上实现了全序广播。这个事实暗示了全序广播与协商一致之间有着密切的联系，我们将在本章稍后部分加以探讨。
 
-Total order broadcast is exactly what you need for database replication: if every message represents a write to the database, and every replica processes the same writes in the same order, then the replicas will remain consistent with each other (aside from any temporary replication lag). This principle is known as state machine replication [60], and we will return to it in Chapter   11.
+全序广播正是数据库复制所需的：如果每个消息代表了对数据库的一次写入，并且每个副本以相同的顺序处理相同的写入，那么副本之间将保持一致（除了任何暂时的复制滞后）。这个原理被称为状态机复制，我们将在第11章中再讨论它。
 
-Similarly, total order broadcast can be used to implement serializable transactions: as discussed in “Actual Serial Execution”, if every message represents a deterministic transaction to be executed as a stored procedure, and if every node processes those messages in the same order, then the partitions and replicas of the database are kept consistent with each other [61].
+同样地，全序广播可以用来实现串行化事务：正如在“实际串行执行”一节中所讨论的，如果每个消息代表了一个要作为存储过程执行的确定性事务，而且如果每个节点以相同的顺序处理这些消息，那么数据库的分区和副本会彼此保持一致。
 
-An important aspect of total order broadcast is that the order is fixed at the time the messages are delivered: a node is not allowed to retroactively insert a message into an earlier position in the order if subsequent messages have already been delivered. This fact makes total order broadcast stronger than timestamp ordering.
+全序广播的一个重要方面是顺序在消息发送时是固定的：如果后续地消息已经送出，则不允许节点回溯性地将消息插入到顺序中的先前位置。这使得全序广播比时间戳排序更强。
 
-Another way of looking at total order broadcast is that it is a way of creating a log (as in a replication log, transaction log, or write-ahead log): delivering a message is like appending to the log. Since all nodes must deliver the same messages in the same order, all nodes can read the log and see the same sequence of messages.
+看待全序广播的另一种方式，那就是，这是一种创建日志（如复制日志、事务日志或预写入日志）的方式：传递消息就像写入日志一样。因为所有节点都必须以相同的顺序传递相同的消息，所以所有的节点都可以读取日志，看到相同的消息序列。
 
-Total order broadcast is also useful for implementing a lock service that provides fencing tokens (see “Fencing tokens”). Every request to acquire the lock is appended as a message to the log, and all messages are sequentially numbered in the order they appear in the log. The sequence number can then serve as a fencing token, because it is monotonically increasing. In ZooKeeper, this sequence number is called zxid [15].
+全序广播对于实现提供栅栏令牌的锁服务也很有用（见“栅栏令牌”一节）。获取锁的每一个请求都会作为消息附加到日志中，并且所有消息都会按照它们在日志中出现的顺序编号。之后，序列号可以用作栅栏令牌，因为它是单调递增的。在ZooKeeper中，这个序列号称为`zxid`。
 
-#### Implementing linearizable storage using total order broadcast
+#### 利用全序广播实现线性化存储
 
-As illustrated in Figure   9-4, in a linearizable system there is a total order of operations. Does that mean linearizability is the same as total order broadcast? Not quite, but there are close links between the two.x
+如图9-4所示，在一个线性化系统中有一个关于操作的全序。这是不是意味着线性化与全序广播是同一回事？不完全是，但是在两者之间有着密切的联系。
 
-Total order broadcast is asynchronous: messages are guaranteed to be delivered reliably in a fixed order, but there is no guarantee about when a message will be delivered (so one recipient may lag behind the others). By contrast, linearizability is a recency guarantee: a read is guaranteed to see the latest value written.
+全序广播是异步的：消息保证是以固定的顺序可靠地传递的，但是没有办法保证什么时侯传递消息（因此，一个接收者可能落后于其他接收者）。相比之下，线性化是种新近性保证：读取操作保证可以看到最新写入的值。
 
-However, if you have total order broadcast, you can build linearizable storage on top of it. For example, you can ensure that usernames uniquely identify user accounts.
+然而如果有了全序广播，你可以在它的基础上构建线性化存储。例如，你可以确保用户名是唯一地标识用户帐户的。
 
-Imagine that for every possible username, you can have a linearizable register with an atomic compare-and-set operation. Every register initially has the value null (indicating that the username is not taken). When a user wants to create a username, you execute a compare-and-set operation on the register for that username, setting it to the user account ID, under the condition that the previous register value is null. If multiple users try to concurrently grab the same username, only one of the compare-and-set operations will succeed, because the others will see a value other than null (due to linearizability).
+想象一下，对于每一个可能的用户名，你可以通过原子性的比较后设置操作拥有一个线性化寄存器。每个寄存器最初的值为`null`（指明用户名还没有取）。当用户想要创建用户名时，在寄存器上为该用户名执行比较后设置操作，将其设置为用户帐户ID，条件是前一个寄存器值为`null`。如果多个用户尝试并发地获取同一个用户名，那么只可能有一个比较后设置操作会成功，因为其他用户（由于线性化）将看到一个不是`null`的值。
 
-You can implement such a linearizable compare-and-set operation as follows by using total order broadcast as an append-only log [62, 63]: 
+您可以通过把全序广播作为只添加日志来实现这样一个线性化的比较后设置操作，如下所示：
 
-1. Append a message to the log, tentatively indicating the username you want to claim.
+1. 在日志中添加一条消息，试探性地指出要求的用户名。
 
-2. Read the log, and wait for the message you appended to be delivered back to you.xi
+2. 读取日志，然后等待被添加的消息发送回来。
 
-3. Check for any messages claiming the username that you want. If the first message for your desired username is your own message, then you are successful: you can commit the username claim (perhaps by appending another message to the log) and acknowledge it to the client. If the first message for your desired username is from another user, you abort the operation.
+3. 检查任何要求你要的用户名的消息。如果对应你想要的用户名的第一条消息是你自己的消息，那么就成功了：您可以提交用户名声明（也许是通过在日志中附加另一条消息）并且向客户端确认。如果第一条消息来自另一个用户，那么操作中止。
 
-Because log entries are delivered to all nodes in the same order, if there are several concurrent writes, all nodes will agree on which one came first. Choosing the first of the conflicting writes as the winner and aborting later ones ensures that all nodes agree on whether a write was committed or aborted. A similar approach can be used to implement serializable multi-object transactions on top of a log [62].
+因为日志条目以相同的顺序传递给所有节点的，如果有几个并发写入请求，那么所有节点都会同意哪条日志是第一条。选择冲突写入中的第一个作为胜利者然后中止后面的写入，可以确保所有节点就写入是否已提交或中止达成一致。类似的方法可以用于在日志基础之上实现串行化的多对象事务。
+
+虽然这个过程确保了线性化写入，但是它并不保证线性化读取——如果从一个异步更新于日志的存储中读取，那么有可能会过期。（准确地说，此处所述的过程提供了顺序一致性，有时也称为时间线一致性，相比于线性化这个保证略弱一些。)要使读取线性化，有几个选项：
 
 While this procedure ensures linearizable writes, it doesn’t guarantee linearizable reads — if you read from a store that is asynchronously updated from the log, it may be stale. (To be precise, the procedure described here provides sequential consistency [47, 64], sometimes also known as timeline consistency [65, 66], a slightly weaker guarantee than linearizability.) To make reads linearizable, there are a few options:
 
