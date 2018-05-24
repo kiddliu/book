@@ -482,19 +482,19 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 * 如果日志允许以线性化的方式获取最新日志消息的位置，你可以查询这个位置，等待所有在此之前的条目送达，然后执行读取。（这就是ZooKeeper的`sync()`操作背后的理念。）
 
-* 您可以向写入同步更新的副本发起读取，因此肯定是最新的。（该技术用于链复制；见“关于复制的研究”一节）。
+* 你可以向写入同步更新的副本发起读取，因此肯定是最新的。（该技术用于链复制；见“关于复制的研究”一节）。
 
 #### 利用线性化存储实现全序广播
 
 上一节展示了如何使用全序广播建立一个线性化的比较后设置操。我们也可以反过来，假设已经有了线性化存储，展示如何用它构建全序广播。
 
-最简单的方法是假设您有一个线性化的寄存器，它可以存储一个整数，并且有原子性的加一后获取的操作。亦或是原子性的比较后设置操作。
+最简单的方法是假设你有一个线性化的寄存器，它可以存储一个整数，并且有原子性的加一后获取的操作。亦或是原子性的比较后设置操作。
 
-算法很简单：对于要通过全序广播发送的每一条消息，您都会加一后获取那个线性化的整数，然后将从寄存器获得的值作为序列号附加到消息中。然后您可以将消息发送到所有节点（重发任何丢失了的消息），接收方将按照序列号连续地传递消息。
+算法很简单：对于要通过全序广播发送的每一条消息，你都会加一后获取那个线性化的整数，然后将从寄存器获得的值作为序列号附加到消息中。然后你可以将消息发送到所有节点（重发任何丢失了的消息），接收方将按照序列号连续地传递消息。
 
 值得注意的是与兰波特时间戳不同，通过递增线性化寄存器获得的数字构成了一个没有间隙的序列。因此，如果节点已经传递了消息4并接收到序列号为6的消息，它知道必须等到消息5之后才能传递消息6。用兰波特时间戳的情况就不一样了——事实上，这就是全序广播和时间戳排序之间的关键区别。
 
-让线性化整数有原子性的加一后获取运算是有多难呢？和往常一样，如果从来没有失败过，那就很容易了：您可以将它保存在一个节点上的一个变量中。问题在于处理到该节点的网络连接中断时的情况，以及节点失效时如何恢复值。一般来说，如果对线性化的序列号生成器考虑得够仔细，你就不可避免地需要协商一致的算法。
+让线性化整数有原子性的加一后获取运算是有多难呢？和往常一样，如果从来没有失败过，那就很容易了：你可以将它保存在一个节点上的一个变量中。问题在于处理到该节点的网络连接中断时的情况，以及节点失效时如何恢复值。一般来说，如果对线性化的序列号生成器考虑得够仔细，你就不可避免地需要协商一致的算法。
 
 这不是巧合：可以证明，线性化的比较后设置(或加一后获取)寄存器和全序广播都等同于协商一致。也就是说，如果你能解决其中的一个问题，你可以把它转化为其他问题的解决方案。这是一个相当深刻和令人惊讶的洞察力！
 
@@ -508,24 +508,117 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 在许多情况下，节点必须达成一致意见。例如：
 
+*主机的选举*
+
+在具有单主机复制的数据库中，所有节点需要一起商定哪个节点是主机。如果一些节点由于网络故障而无法与其他节点通信，那么主机的地位可能会出现争议。在这种情况下，协商一致在防止出现恶劣的故障迁移非常重要，因为这会导致两个节点都认为自己是领导者的裂脑状态（见“处理节点中断”一节）。如果有两位领导者，他们都会接受写作，他们的数据也会出现分歧，从而导致不一致和数据丢失。
 
 
-Leader election
+*原子性提交*
 
-In a database with single-leader replication, all nodes need to agree on which node is the leader. The leadership position might become contested if some nodes can’t communicate with others due to a network fault. In this case, consensus is important to avoid a bad failover, resulting in a split brain situation in which two nodes both believe themselves to be the leader (see “Handling Node Outages”). If there were two leaders, they would both accept writes and their data would diverge, leading to inconsistency and data loss.
+在支持事务跨越多个节点或分区的数据库中，我们有这样一个问题：一个事务在某些节点上可能失败，而在另一些节点上会成功。如果我们想维持事务原子性（在ACID的意义上，见“原子性”一节），我们必须让所有节点就事务的结果达成一致：要么它们都中止/回滚（如果出了什么问题），要么它们都提交（如果没有出任何问题）。这个协商一致的例子被称为*原子提交*问题。
 
-Atomic commit
-
-In a database that supports transactions spanning several nodes or partitions, we have the problem that a transaction may fail on some nodes but succeed on others. If we want to maintain transaction atomicity (in the sense of ACID; see “Atomicity”), we have to get all nodes to agree on the outcome of the transaction: either they all abort/ roll back (if anything goes wrong) or they all commit (if nothing goes wrong). This instance of consensus is known as the atomic commit problem.xii
-
-> **The Impossibility of Consensus**
+> **不可能达成的共识**
 >
-> You may have heard about the FLP result [68] — named after the authors Fischer, Lynch, and Paterson — which proves that there is no algorithm that is always able to reach consensus if there is a risk that a node may crash. In a distributed system, we must assume that nodes may crash, so reliable consensus is impossible. Yet, here we are, discussing algorithms for achieving consensus. What is going on here?
+> 你可能已经听说过FLP结果——以作者菲舍尔、林奇和帕特森命名——它证明了如果存在节点可能会崩溃的风险，那么没有算法总是能够达成一致。在分布式系统中，我们必须假设节点可能会崩溃，因此可靠的一致性是不可能的了。然而，我们现在在这里，正在讨论了达成一致的算法。到底是怎么一回事？
 >
-> The answer is that the FLP result is proved in the asynchronous system model (see “System Model and Reality”), a very restrictive model that assumes a deterministic algorithm that cannot use any clocks or timeouts. If the algorithm is allowed to use timeouts, or some other way of identifying suspected crashed nodes (even if the suspicion is sometimes wrong), then consensus becomes solvable [67]. Even just allowing the algorithm to use random numbers is sufficient to get around the impossibility result [69].
+> 答案是，FLP结果在异步系统模型(见“系统模型与现实”一节)中证明的，这是一个非常严格的模型，它假设了确定性算法是不能使用任何时钟或超时。如果允许算法使用超时，或者使用其他方法识别可疑的崩溃节点(即使怀疑有时是错误的)，那么协商一致就可以解决。即使只允许算法使用随机数，也足以绕过这个不可能的结果。
 >
-> Thus, although the FLP result about the impossibility of consensus is of great theoretical importance, distributed systems can usually achieve consensus in practice.
+> 因此，虽然不可能达成协商一致的FLP结果有着重要的理论意义，但分布式系统在实际应用中通常是可以达到共识的。
 
-In this section we will first examine the atomic commit problem in more detail. In particular, we will discuss the two-phase commit (2PC) algorithm, which is the most common way of solving atomic commit and which is implemented in various databases, messaging systems, and application servers. It turns out that 2PC is a kind of consensus algorithm — but not a very good one [70, 71].
+在这一节中，我们首先会更详细地研究原子提交问题。我们会特别讨论两阶段提交（2PC）算法，这是最常见的解决原子提交的方法，并在各种数据库、消息系统和应用服务器中实现。事实证明，2PC是一种协商一致的算法——但不是最好的那个。
 
-By learning from 2PC we will then work our way toward better consensus algorithms, such as those used in ZooKeeper (Zab) and etcd (Raft).
+通过学习2PC算法，我们将了解更好的协商一致算法，比如那些用于ZooKeeper（Zab）和etcd（Raft）里的那些算法。
+
+### Atomic Commit and Two-Phase Commit (2PC)
+
+In Chapter   7 we learned that the purpose of transaction atomicity is to provide simple semantics in the case where something goes wrong in the middle of making several writes. The outcome of a transaction is either a successful commit, in which case all of the transaction’s writes are made durable, or an abort, in which case all of the transaction’s writes are rolled back (i.e., undone or discarded).
+
+Atomicity prevents failed transactions from littering the database with half-finished results and half-updated state. This is especially important for multi-object transactions (see “Single-Object and Multi-Object Operations”) and databases that maintain secondary indexes. Each secondary index is a separate data structure from the primary data — thus, if you modify some data, the corresponding change needs to also be made in the secondary index. Atomicity ensures that the secondary index stays consistent with the primary data (if the index became inconsistent with the primary data, it would not be very useful).
+
+#### From single-node to distributed atomic commit
+
+For transactions that execute at a single database node, atomicity is commonly implemented by the storage engine. When the client asks the database node to commit the transaction, the database makes the transaction’s writes durable (typically in a write-ahead log; see “Making B-trees reliable”) and then appends a commit record to the log on disk. If the database crashes in the middle of this process, the transaction is recovered from the log when the node restarts: if the commit record was successfully written to disk before the crash, the transaction is considered committed; if not, any writes from that transaction are rolled back.
+
+Thus, on a single node, transaction commitment crucially depends on the order in which data is durably written to disk: first the data, then the commit record [72]. The key deciding moment for whether the transaction commits or aborts is the moment at which the disk finishes writing the commit record: before that moment, it is still possible to abort (due to a crash), but after that moment, the transaction is committed (even if the database crashes). Thus, it is a single device (the controller of one particular disk drive, attached to one particular node) that makes the commit atomic.
+
+However, what if multiple nodes are involved in a transaction? For example, perhaps you have a multi-object transaction in a partitioned database, or a term-partitioned secondary index (in which the index entry may be on a different node from the primary data; see “Partitioning and Secondary Indexes”). Most “NoSQL” distributed datastores do not support such distributed transactions, but various clustered relational systems do (see “Distributed Transactions in Practice”).
+
+In these cases, it is not sufficient to simply send a commit request to all of the nodes and independently commit the transaction on each one. In doing so, it could easily happen that the commit succeeds on some nodes and fails on other nodes, which would violate the atomicity guarantee:
+
+* Some nodes may detect a constraint violation or conflict, making an abort necessary, while other nodes are successfully able to commit.
+
+* Some of the commit requests might be lost in the network, eventually aborting due to a timeout, while other commit requests get through.
+
+* Some nodes may crash before the commit record is fully written and roll back on recovery, while others successfully commit.
+
+If some nodes commit the transaction but others abort it, the nodes become inconsistent with each other (like in Figure   7-3). And once a transaction has been committed on one node, it cannot be retracted again if it later turns out that it was aborted on another node. For this reason, a node must only commit once it is certain that all other nodes in the transaction are also going to commit.
+
+A transaction commit must be irrevocable — you are not allowed to change your mind and retroactively abort a transaction after it has been committed. The reason for this rule is that once data has been committed, it becomes visible to other transactions, and thus other clients may start relying on that data; this principle forms the basis of read committed isolation, discussed in “Read Committed”. If a transaction was allowed to abort after committing, any transactions that read the committed data would be based on data that was retroactively declared not to have existed — so they would have to be reverted as well.
+
+(It is possible for the effects of a committed transaction to later be undone by another, compensating transaction [73, 74]. However, from the database’s point of view this is a separate transaction, and thus any cross-transaction correctness requirements are the application’s problem.)
+
+#### Introduction to two-phase commit
+
+Two-phase commit is an algorithm for achieving atomic transaction commit across multiple nodes — i.e., to ensure that either all nodes commit or all nodes abort. It is a classic algorithm in distributed databases [13, 35, 75]. 2PC is used internally in some databases and also made available to applications in the form of XA transactions [76, 77] (which are supported by the Java Transaction API, for example) or via WS-AtomicTransaction for SOAP web services [78, 79].
+
+The basic flow of 2PC is illustrated in Figure   9-9. Instead of a single commit request, as with a single-node transaction, the commit/ abort process in 2PC is split into two phases (hence the name).
+
+*Figure 9-9. A successful execution of two-phase commit (2PC).*
+
+> **Don’t confuse 2PC and 2PL**
+>
+> Two-phase commit (2PC) and two-phase locking (see “Two-Phase Locking (2PL)”) are two very different things. 2PC provides atomic commit in a distributed database, whereas 2PL provides serializable isolation. To avoid confusion, it’s best to think of them as entirely separate concepts and to ignore the unfortunate similarity in the names.
+
+2PC uses a new component that does not normally appear in single-node transactions: a coordinator (also known as transaction manager). The coordinator is often implemented as a library within the same application process that is requesting the transaction (e.g., embedded in a Java EE container), but it can also be a separate process or service. Examples of such coordinators include Narayana, JOTM, BTM, or MSDTC.
+
+A 2PC transaction begins with the application reading and writing data on multiple database nodes, as normal. We call these database nodes participants in the transaction. When the application is ready to commit, the coordinator begins phase 1: it sends a prepare request to each of the nodes, asking them whether they are able to commit. The coordinator then tracks the responses from the participants:
+
+* If all participants reply “yes,” indicating they are ready to commit, then the coordinator sends out a commit request in phase 2, and the commit actually takes place.
+
+* If any of the participants replies “no,” the coordinator sends an abort request to all nodes in phase 2.
+
+This process is somewhat like the traditional marriage ceremony in Western cultures: the minister asks the bride and groom individually whether each wants to marry the other, and typically receives the answer “I do” from both. After receiving both acknowledgments, the minister pronounces the couple husband and wife: the transaction is committed, and the happy fact is broadcast to all attendees. If either bride or groom does not say “yes,” the ceremony is aborted [73].
+
+#### A system of promises
+
+From this short description it might not be clear why two-phase commit ensures atomicity, while one-phase commit across several nodes does not. Surely the prepare and commit requests can just as easily be lost in the two-phase case. What makes 2PC different?
+
+To understand why it works, we have to break down the process in a bit more detail:
+
+1. When the application wants to begin a distributed transaction, it requests a transaction ID from the coordinator. This transaction ID is globally unique.
+
+2. The application begins a single-node transaction on each of the participants, and attaches the globally unique transaction ID to the single-node transaction. All reads and writes are done in one of these single-node transactions. If anything goes wrong at this stage (for example, a node crashes or a request times out), the coordinator or any of the participants can abort.
+
+3. When the application is ready to commit, the coordinator sends a prepare request to all participants, tagged with the global transaction ID. If any of these requests fails or times out, the coordinator sends an abort request for that transaction ID to all participants.
+
+4. When a participant receives the prepare request, it makes sure that it can definitely commit the transaction under all circumstances. This includes writing all transaction data to disk (a crash, a power failure, or running out of disk space is not an acceptable excuse for refusing to commit later), and checking for any conflicts or constraint violations. By replying “yes” to the coordinator, the node promises to commit the transaction without error if requested. In other words, the participant surrenders the right to abort the transaction, but without actually committing it.
+
+5. When the coordinator has received responses to all prepare requests, it makes a definitive decision on whether to commit or abort the transaction (committing only if all participants voted “yes”). The coordinator must write that decision to its transaction log on disk so that it knows which way it decided in case it subsequently crashes. This is called the commit point.
+
+6. Once the coordinator’s decision has been written to disk, the commit or abort request is sent to all participants. If this request fails or times out, the coordinator must retry forever until it succeeds. There is no more going back: if the decision was to commit, that decision must be enforced, no matter how many retries it takes. If a participant has crashed in the meantime, the transaction will be committed when it recovers — since the participant voted “yes,” it cannot refuse to commit when it recovers.
+
+Thus, the protocol contains two crucial “points of no return”: when a participant votes “yes,” it promises that it will definitely be able to commit later (although the coordinator may still choose to abort); and once the coordinator decides, that decision is irrevocable. Those promises ensure the atomicity of 2PC. (Single-node atomic commit lumps these two events into one: writing the commit record to the transaction log.)
+
+Returning to the marriage analogy, before saying “I do,” you and your bride/ groom have the freedom to abort the transaction by saying “No way!” (or something to that effect). However, after saying “I do,” you cannot retract that statement. If you faint after saying “I do” and you don’t hear the minister speak the words “You are now husband and wife,” that doesn’t change the fact that the transaction was committed. When you recover consciousness later, you can find out whether you are married or not by querying the minister for the status of your global transaction ID, or you can wait for the minister’s next retry of the commit request (since the retries will have continued throughout your period of unconsciousness).
+
+#### Coordinator failure
+
+We have discussed what happens if one of the participants or the network fails during 2PC: if any of the prepare requests fail or time out, the coordinator aborts the transaction; if any of the commit or abort requests fail, the coordinator retries them indefinitely. However, it is less clear what happens if the coordinator crashes.
+
+If the coordinator fails before sending the prepare requests, a participant can safely abort the transaction. But once the participant has received a prepare request and voted “yes,” it can no longer abort unilaterally — it must wait to hear back from the coordinator whether the transaction was committed or aborted. If the coordinator crashes or the network fails at this point, the participant can do nothing but wait. A participant’s transaction in this state is called in doubt or uncertain.
+
+The situation is illustrated in Figure   9-10. In this particular example, the coordinator actually decided to commit, and database 2 received the commit request. However, the coordinator crashed before it could send the commit request to database 1, and so database 1 does not know whether to commit or abort. Even a timeout does not help here: if database 1 unilaterally aborts after a timeout, it will end up inconsistent with database 2, which has committed. Similarly, it is not safe to unilaterally commit, because another participant may have aborted.
+
+*Figure 9-10. The coordinator crashes after participants vote “yes.” Database 1 does not know whether to commit or abort.*
+
+Without hearing from the coordinator, the participant has no way of knowing whether to commit or abort. In principle, the participants could communicate among themselves to find out how each participant voted and come to some agreement, but that is not part of the 2PC protocol.
+
+The only way 2PC can complete is by waiting for the coordinator to recover. This is why the coordinator must write its commit or abort decision to a transaction log on disk before sending commit or abort requests to participants: when the coordinator recovers, it determines the status of all in-doubt transactions by reading its transaction log. Any transactions that don’t have a commit record in the coordinator’s log are aborted. Thus, the commit point of 2PC comes down to a regular single-node atomic commit on the coordinator.
+
+#### Three-phase commit
+
+Two-phase commit is called a blocking atomic commit protocol due to the fact that 2PC can become stuck waiting for the coordinator to recover. In theory, it is possible to make an atomic commit protocol nonblocking, so that it does not get stuck if a node fails. However, making this work in practice is not so straightforward.
+
+As an alternative to 2PC, an algorithm called three-phase commit (3PC) has been proposed [13, 80]. However, 3PC assumes a network with bounded delay and nodes with bounded response times; in most practical systems with unbounded network delay and process pauses (see Chapter   8), it cannot guarantee atomicity.
+
+In general, nonblocking atomic commit requires a perfect failure detector [67, 71] — i.e., a reliable mechanism for telling whether a node has crashed or not. In a network with unbounded delay a timeout is not a reliable failure detector, because a request may time out due to a network problem even if no node has crashed. For this reason, 2PC continues to be used, despite the known problem with coordinator failure.
