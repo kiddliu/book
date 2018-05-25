@@ -529,19 +529,21 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 通过学习2PC算法，我们将了解更好的协商一致算法，比如那些用于ZooKeeper（Zab）和etcd（Raft）里的那些算法。
 
-### Atomic Commit and Two-Phase Commit (2PC)
+### 原子提交与两阶段提交（2PC）
 
-In Chapter   7 we learned that the purpose of transaction atomicity is to provide simple semantics in the case where something goes wrong in the middle of making several writes. The outcome of a transaction is either a successful commit, in which case all of the transaction’s writes are made durable, or an abort, in which case all of the transaction’s writes are rolled back (i.e., undone or discarded).
+在第7章中，我们了解到事务原子性的目的，是在发起几次写入时中间出错的情况下提供简单的语义。事务的结果要么是成功提交，在这种情况下事务的所有写入都持久化了，要么是中止，在这种情况下事务的所有写入都回滚了（也就是撤消或者丢弃了）。
 
-Atomicity prevents failed transactions from littering the database with half-finished results and half-updated state. This is especially important for multi-object transactions (see “Single-Object and Multi-Object Operations”) and databases that maintain secondary indexes. Each secondary index is a separate data structure from the primary data — thus, if you modify some data, the corresponding change needs to also be made in the secondary index. Atomicity ensures that the secondary index stays consistent with the primary data (if the index became inconsistent with the primary data, it would not be very useful).
+原子性防止了失败的事务把完成一半的结果和一半更新的状态丢在数据库中。这对于多对象事务（见“单对象和多对象操作”一节）以及维护二级索引的数据库尤其重要。每个二级索引都是一个独立于主数据的数据结构——因此如果您修改了一些数据，那么还需要在二级索引中进行相应的更改。原子性确保了二级索引与主数据保持一致（如果索引变得与主数据不一致，那就没有太大用处了）。
 
-#### From single-node to distributed atomic commit
+#### 从单节点到多节点的原子提交
 
-For transactions that execute at a single database node, atomicity is commonly implemented by the storage engine. When the client asks the database node to commit the transaction, the database makes the transaction’s writes durable (typically in a write-ahead log; see “Making B-trees reliable”) and then appends a commit record to the log on disk. If the database crashes in the middle of this process, the transaction is recovered from the log when the node restarts: if the commit record was successfully written to disk before the crash, the transaction is considered committed; if not, any writes from that transaction are rolled back.
+对于在单个数据库节点上执行的事务，原子性通常由存储引擎实现。当客户端请求数据库节点提交事务时，数据库使事务的写操作持久化（通常在预写日志中；见“使B树变得可靠”一节），然后将提交记录添加到磁盘上的日志中。如果数据库在这个过程中间崩溃，那么节点重启之后事务可以从日志中恢复：如果提交记录在崩溃前成功写入磁盘，那么可以认为事务已经提交了；如果没有，任何来自该事务的写入都被回滚。
 
-Thus, on a single node, transaction commitment crucially depends on the order in which data is durably written to disk: first the data, then the commit record [72]. The key deciding moment for whether the transaction commits or aborts is the moment at which the disk finishes writing the commit record: before that moment, it is still possible to abort (due to a crash), but after that moment, the transaction is committed (even if the database crashes). Thus, it is a single device (the controller of one particular disk drive, attached to one particular node) that makes the commit atomic.
+因此，在单个节点上，事务提交在很大程度上取决于数据持久化写入磁盘的顺序：首先是数据，然后是提交记录。决定事务是提交还是中止的关键时刻是磁盘完成写入提交记录的时刻：在此之前，仍然可以中止（由于崩溃的原因），但在这个时刻之后，事务被提交了(即使数据库之后发生崩溃)。因此，是单个设备(连接到特定节点、某个特定磁盘驱动器的控制器)使提交具有原子性。
 
-However, what if multiple nodes are involved in a transaction? For example, perhaps you have a multi-object transaction in a partitioned database, or a term-partitioned secondary index (in which the index entry may be on a different node from the primary data; see “Partitioning and Secondary Indexes”). Most “NoSQL” distributed datastores do not support such distributed transactions, but various clustered relational systems do (see “Distributed Transactions in Practice”).
+但是，如果事务涉及到多个节点该怎么办？例如，您可能在分区数据库中有一个多对象事务，或者有一个术语分区次级索引（索引项可能位于与主数据不同的节点上；见“分区与次级索引”一节）。大多数“NoSQL”分布式数据存储不支持这样的分布式事务，但是各种集群关系型系统支持（见“实践中的分布式事务”一节）。
+
+
 
 In these cases, it is not sufficient to simply send a commit request to all of the nodes and independently commit the transaction on each one. In doing so, it could easily happen that the commit succeeds on some nodes and fails on other nodes, which would violate the atomicity guarantee:
 
