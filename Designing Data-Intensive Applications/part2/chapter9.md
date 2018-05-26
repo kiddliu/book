@@ -533,7 +533,7 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 在第7章中，我们了解到事务原子性的目的，是在发起几次写入时中间出错的情况下提供简单的语义。事务的结果要么是成功提交，在这种情况下事务的所有写入都持久化了，要么是中止，在这种情况下事务的所有写入都回滚了（也就是撤消或者丢弃了）。
 
-原子性防止了失败的事务把完成一半的结果和一半更新的状态丢在数据库中。这对于多对象事务（见“单对象和多对象操作”一节）以及维护二级索引的数据库尤其重要。每个二级索引都是一个独立于主数据的数据结构——因此如果您修改了一些数据，那么还需要在二级索引中进行相应的更改。原子性确保了二级索引与主数据保持一致（如果索引变得与主数据不一致，那就没有太大用处了）。
+原子性防止了失败的事务把完成一半的结果和一半更新的状态丢在数据库中。这对于多对象事务（见“单对象和多对象操作”一节）以及维护二级索引的数据库尤其重要。每个二级索引都是一个独立于主数据的数据结构——因此如果你修改了一些数据，那么还需要在二级索引中进行相应的更改。原子性确保了二级索引与主数据保持一致（如果索引变得与主数据不一致，那就没有太大用处了）。
 
 #### 从单节点到多节点的原子提交
 
@@ -541,86 +541,84 @@ CAP最初是作为经验法则提出的，没有准确的定义，目的是为�
 
 因此，在单个节点上，事务提交在很大程度上取决于数据持久化写入磁盘的顺序：首先是数据，然后是提交记录。决定事务是提交还是中止的关键时刻是磁盘完成写入提交记录的时刻：在此之前，仍然可以中止（由于崩溃的原因），但在这个时刻之后，事务被提交了(即使数据库之后发生崩溃)。因此，是单个设备(连接到特定节点、某个特定磁盘驱动器的控制器)使提交具有原子性。
 
-但是，如果事务涉及到多个节点该怎么办？例如，您可能在分区数据库中有一个多对象事务，或者有一个术语分区次级索引（索引项可能位于与主数据不同的节点上；见“分区与次级索引”一节）。大多数“NoSQL”分布式数据存储不支持这样的分布式事务，但是各种集群关系型系统支持（见“实践中的分布式事务”一节）。
+但是，如果事务涉及到多个节点该怎么办？例如，你可能在分区数据库中有一个多对象事务，或者有一个术语分区次级索引（索引项可能位于与主数据不同的节点上；见“分区与次级索引”一节）。大多数“NoSQL”分布式数据存储不支持这样的分布式事务，但是各种集群关系型系统支持（见“实践中的分布式事务”一节）。
 
+在这些情况下，仅仅向所有节点发送提交请求并在每个节点上独立地提交事务是不够的。在这样做时，很容易发生在某些节点上提交成功而在其他节点上提交失败的情况，这违反了原子性保证：
 
+* 一些节点可能检测到约束条件被违反或是冲突，因而中止无法避免，而其他节点则可以成功提交。
 
-In these cases, it is not sufficient to simply send a commit request to all of the nodes and independently commit the transaction on each one. In doing so, it could easily happen that the commit succeeds on some nodes and fails on other nodes, which would violate the atomicity guarantee:
+* 一些提交请求可能在网络中丢失，最终导致超时而事务中止，而其他提交请求则正常通过。
 
-* Some nodes may detect a constraint violation or conflict, making an abort necessary, while other nodes are successfully able to commit.
+* 某些节点可能在提交记录被完全写入之前崩溃，于是恢复时回滚了，而其他节点则成功提交。
 
-* Some of the commit requests might be lost in the network, eventually aborting due to a timeout, while other commit requests get through.
+如果一些节点提交了事务而另一些却中止了事务，节点之间就会变得不一致（就像图7-3中那样）。一旦事务在一个节点上提交了，即使后来发现它在另一个节点上被中止，也不能再撤销了。由于这个原因，一个节点只能在事务中的所有其他节点也都会提交的情况下才能提交。
 
-* Some nodes may crash before the commit record is fully written and roll back on recovery, while others successfully commit.
+事务提交必须是不可撤销的——你无法在事务提交后改变主意并追溯性地中止事务。这条规则的原因是一旦数据被提交，它对于其他事务就是可见地了，因此其他客户端会开始依赖这个数据；这一原则构成了在“提交读”一节中讨论的提交读隔离的基础。如果允许事务在提交后还可以中止，那么任何读取了已经提交的数据的事务都会是基于被追溯性声明不存在的数据——于是它们也必须被撤销。
 
-If some nodes commit the transaction but others abort it, the nodes become inconsistent with each other (like in Figure   7-3). And once a transaction has been committed on one node, it cannot be retracted again if it later turns out that it was aborted on another node. For this reason, a node must only commit once it is certain that all other nodes in the transaction are also going to commit.
+（提交了的事务结果稍后可以被另一个抵消性质的事务复原。然而从数据库的角度来看这是一个单独的事务，因此任何跨事务正确性要求都是应用程序自己的问题。）
 
-A transaction commit must be irrevocable — you are not allowed to change your mind and retroactively abort a transaction after it has been committed. The reason for this rule is that once data has been committed, it becomes visible to other transactions, and thus other clients may start relying on that data; this principle forms the basis of read committed isolation, discussed in “Read Committed”. If a transaction was allowed to abort after committing, any transactions that read the committed data would be based on data that was retroactively declared not to have existed — so they would have to be reverted as well.
+#### 两阶段提交介绍
 
-(It is possible for the effects of a committed transaction to later be undone by another, compensating transaction [73, 74]. However, from the database’s point of view this is a separate transaction, and thus any cross-transaction correctness requirements are the application’s problem.)
+两阶段提交是一种跨多个节点实现原子事务提交的算法——即，确保所有节点要么都提交要么都中止。它是分布式数据库中的经典算法。2PC在一些数据库中内部使用，也以*XA transactions*（例如被Java事务API支持）的形式提供给应用程序，或者以WS-AtomicTransaction的形式用于SOAP Web服务。
 
-#### Introduction to two-phase commit
+2PC的基本流程如图9-9所示。与单节点事务的单个提交请求不同的是，2PC中的提交/中止进程被分成两个阶段（因此而得名）。
 
-Two-phase commit is an algorithm for achieving atomic transaction commit across multiple nodes — i.e., to ensure that either all nodes commit or all nodes abort. It is a classic algorithm in distributed databases [13, 35, 75]. 2PC is used internally in some databases and also made available to applications in the form of XA transactions [76, 77] (which are supported by the Java Transaction API, for example) or via WS-AtomicTransaction for SOAP web services [78, 79].
+*图9-9 一次两阶段提交（2PC）的成功执行*
 
-The basic flow of 2PC is illustrated in Figure   9-9. Instead of a single commit request, as with a single-node transaction, the commit/ abort process in 2PC is split into two phases (hence the name).
-
-*Figure 9-9. A successful execution of two-phase commit (2PC).*
-
-> **Don’t confuse 2PC and 2PL**
+> **不要混淆2PC和2PL**
 >
-> Two-phase commit (2PC) and two-phase locking (see “Two-Phase Locking (2PL)”) are two very different things. 2PC provides atomic commit in a distributed database, whereas 2PL provides serializable isolation. To avoid confusion, it’s best to think of them as entirely separate concepts and to ignore the unfortunate similarity in the names.
+> 两阶段提交（2PC）和两阶段锁定（见“两阶段锁定（2PL）”一节）是两件非常不同的事情。2PC在分布式数据库中提供原子提交，而2PL提供序列化的隔离。为了避免混淆，最好把它们看作是完全独立的概念，而忽略名字之间的相似之处。
 
-2PC uses a new component that does not normally appear in single-node transactions: a coordinator (also known as transaction manager). The coordinator is often implemented as a library within the same application process that is requesting the transaction (e.g., embedded in a Java EE container), but it can also be a separate process or service. Examples of such coordinators include Narayana, JOTM, BTM, or MSDTC.
+2PC使用了一个通常不在单节点事务中出现的新组件：协调器（也称为事务管理器）。协调器通常被实现为请求事务的应用程序进程中的一个库(例如，嵌入在JavaEE容器中)，但它也可以是一个单独的进程或服务。这类协调员的例子包括Narayana、JOTM、BTM或MSDTC。
 
-A 2PC transaction begins with the application reading and writing data on multiple database nodes, as normal. We call these database nodes participants in the transaction. When the application is ready to commit, the coordinator begins phase 1: it sends a prepare request to each of the nodes, asking them whether they are able to commit. The coordinator then tracks the responses from the participants:
+如往常一样，2PC事务始于应用程序在多个数据库节点上读写数据开始。在事务中我们把这些数据库节点称为*参与者*。当应用程序准备提交时，协调器开始第1阶段：它向每个节点发送一个*准备*请求，询问它们是否能够提交。协调员随后跟踪参与者的响应：
 
-* If all participants reply “yes,” indicating they are ready to commit, then the coordinator sends out a commit request in phase 2, and the commit actually takes place.
+* 如果所有参与者都回答“是”，表示他们已经准备好提交，那么协调器将在第2阶段发出提交请求，并且提交实际发生。
 
-* If any of the participants replies “no,” the coordinator sends an abort request to all nodes in phase 2.
+* 如果任何参与者回答“否”，协调器将向阶段2中的所有节点发送*中止*请求。
 
-This process is somewhat like the traditional marriage ceremony in Western cultures: the minister asks the bride and groom individually whether each wants to marry the other, and typically receives the answer “I do” from both. After receiving both acknowledgments, the minister pronounces the couple husband and wife: the transaction is committed, and the happy fact is broadcast to all attendees. If either bride or groom does not say “yes,” the ceremony is aborted [73].
+这个过程有点像西方文化中的传统婚礼：牧师分别询问新娘和新郎双方是否愿意结婚，通常都会从双方那里得到“我愿意”的回答。在收到双方的确认后，牧师宣布夫妻双方的婚姻：事务已经提交，并且这一愉快的事实将向所有参与者广播。如果新娘或新郎没有说“是”，婚礼就中止了。
 
-#### A system of promises
+#### 满是承诺的系统
 
-From this short description it might not be clear why two-phase commit ensures atomicity, while one-phase commit across several nodes does not. Surely the prepare and commit requests can just as easily be lost in the two-phase case. What makes 2PC different?
+从这个简短的描述中为什么两阶段提交确保了原子性可能并不清楚，而跨几个节点的一阶段提交却不能。在两阶段情况下准备和提交请求当然也同样容易丢失。那是什么让2PC与众不同的？
 
-To understand why it works, we have to break down the process in a bit more detail:
+要了理解它的工作原理，我们必须更详细地分解这个过程：
 
-1. When the application wants to begin a distributed transaction, it requests a transaction ID from the coordinator. This transaction ID is globally unique.
+1. 当应用程序想要开启一个分布式事务时，它会从协调器请求事务ID。这个事务ID是全局唯一的。
 
-2. The application begins a single-node transaction on each of the participants, and attaches the globally unique transaction ID to the single-node transaction. All reads and writes are done in one of these single-node transactions. If anything goes wrong at this stage (for example, a node crashes or a request times out), the coordinator or any of the participants can abort.
+2. 应用程序在每个参与者上开始一个单节点事务，并将全局唯一的事务ID附加到单个节点事务。所有的读写都是在这些单节点事务中完成的。如果在此阶段出现任何问题（例如，节点崩溃或请求超时），协调器或任何参与者都可以中止。
 
-3. When the application is ready to commit, the coordinator sends a prepare request to all participants, tagged with the global transaction ID. If any of these requests fails or times out, the coordinator sends an abort request for that transaction ID to all participants.
+3. 当应用程序准备提交时，协调器向所有参与者发送一个准备请求，并使用全局事务ID进行标记。如果这些请求中有任何一个失败或超时，协调器将向所有参与者发送针对该事务ID的中止请求。
 
-4. When a participant receives the prepare request, it makes sure that it can definitely commit the transaction under all circumstances. This includes writing all transaction data to disk (a crash, a power failure, or running out of disk space is not an acceptable excuse for refusing to commit later), and checking for any conflicts or constraint violations. By replying “yes” to the coordinator, the node promises to commit the transaction without error if requested. In other words, the participant surrenders the right to abort the transaction, but without actually committing it.
+4. 当参与者收到准备请求时，它确保在任何情况下都能够提交事务。这包括将所有事务数据写入磁盘（崩溃、电源故障或磁盘空间耗尽都不是稍后拒绝提交不可接受的借口），以及检查是否存在任何冲突或违反约束。通过对协调器回答“是”，节点承诺在请求时正确无误地提交事务。换句话说，参与者交出了中止事务的权限，也没有实际提交事务。
 
-5. When the coordinator has received responses to all prepare requests, it makes a definitive decision on whether to commit or abort the transaction (committing only if all participants voted “yes”). The coordinator must write that decision to its transaction log on disk so that it knows which way it decided in case it subsequently crashes. This is called the commit point.
+5. 当协调器已经收到所有针对准备请求的响应时，是提交还是中止事务它会做出决定性的决定（只有在所有参与者都投票赞成“是”才会提交）。协调器必须把这个决定写入到磁盘上的事务日志中，以防之后崩溃的话它知道这是如何确定下来的。这被称为*提交点*。
 
-6. Once the coordinator’s decision has been written to disk, the commit or abort request is sent to all participants. If this request fails or times out, the coordinator must retry forever until it succeeds. There is no more going back: if the decision was to commit, that decision must be enforced, no matter how many retries it takes. If a participant has crashed in the meantime, the transaction will be committed when it recovers — since the participant voted “yes,” it cannot refuse to commit when it recovers.
+6. 一旦协调器的决定被写入磁盘，提交或中止请求会被发送给所有参与者。如果此请求失败或是超时，协调器必须一直重试，直至成功。不再有回退了：如果这个决定是提交，那么这个决定就必须被执行，无论需要多少次重试。如果一个参与者在此期间崩溃，那么事务会在它恢复的时候提交——因为它投了“是”，因此恢复的时侯它不能拒绝提交。
 
-Thus, the protocol contains two crucial “points of no return”: when a participant votes “yes,” it promises that it will definitely be able to commit later (although the coordinator may still choose to abort); and once the coordinator decides, that decision is irrevocable. Those promises ensure the atomicity of 2PC. (Single-node atomic commit lumps these two events into one: writing the commit record to the transaction log.)
+因此，这个协议包含两个关键的“不回退点”：当参与者投“是”的时侯，它承诺它肯定稍后可以提交（尽管协调器仍可选择中止）；一旦协调器做出决定，决定是不可撤销的。这些承诺保证了2PC的原子性。（单节点原子提交把这两个事件合并为一个：把提交记录写入事务日志。）
 
-Returning to the marriage analogy, before saying “I do,” you and your bride/ groom have the freedom to abort the transaction by saying “No way!” (or something to that effect). However, after saying “I do,” you cannot retract that statement. If you faint after saying “I do” and you don’t hear the minister speak the words “You are now husband and wife,” that doesn’t change the fact that the transaction was committed. When you recover consciousness later, you can find out whether you are married or not by querying the minister for the status of your global transaction ID, or you can wait for the minister’s next retry of the commit request (since the retries will have continued throughout your period of unconsciousness).
+回到婚姻的类比中，在说“我愿意”之前，你和你的新娘/新郎可以通过说“没门”（或是有类似效果的东西）自由地中止事务。然而在说了“我愿意”之后，你不能收回那句话。如果你在说“我愿意”之后晕倒了，而你没有听到牧师说“你们现在是夫妻了”，那也改变不了事务已经发生的事实。当稍后恢复意识时，你可以通过查询神父的全局事务ID状态来确定你是否已经结婚了，或者你可以等待神父下一次提交请求的重试（因为重试会在你整个失去意识期间继续进行）。
 
-#### Coordinator failure
+#### 协调器失效
 
-We have discussed what happens if one of the participants or the network fails during 2PC: if any of the prepare requests fail or time out, the coordinator aborts the transaction; if any of the commit or abort requests fail, the coordinator retries them indefinitely. However, it is less clear what happens if the coordinator crashes.
+我们已经讨论了在2PC期间，如果其中一个参与者或是网络失效会发生什么：如果任何准备请求失败或超时，协调器会中止事务；如果任何提交请求或中止请求失败，协调器将无限地重试。但是如果协调器崩溃就不是太清楚会发生什么了。
 
-If the coordinator fails before sending the prepare requests, a participant can safely abort the transaction. But once the participant has received a prepare request and voted “yes,” it can no longer abort unilaterally — it must wait to hear back from the coordinator whether the transaction was committed or aborted. If the coordinator crashes or the network fails at this point, the participant can do nothing but wait. A participant’s transaction in this state is called in doubt or uncertain.
+如果协调器在发送准备请求之前失败，则参与者可以安全地中止事务。但是，一旦参与者收到了准备请求并投了“是”，它就不能单方面中止事务——它必须等待协调员的回复事务是提交了还是中止了。如果协调器在这个时候崩溃或网络失败，参与者什么都做不了只能等待。参与者在这种状态下的交易被称为*怀疑*或*不确定*。
 
-The situation is illustrated in Figure   9-10. In this particular example, the coordinator actually decided to commit, and database 2 received the commit request. However, the coordinator crashed before it could send the commit request to database 1, and so database 1 does not know whether to commit or abort. Even a timeout does not help here: if database 1 unilaterally aborts after a timeout, it will end up inconsistent with database 2, which has committed. Similarly, it is not safe to unilaterally commit, because another participant may have aborted.
+这种情况如图9-10所示。在这个特定的例子中，协调器实际上决定了要提交事务，而且数据库2收到了提交请求。然而，协调器在将提交请求发送到数据库1之前崩溃了，因而数据库1不知道是提交还是中止。这个时候即使是超时也于事无补：如果数据库1在超时后单方面中止，那么最终它会与已经提交了的数据库2不一致。同样地，单方面提交是不安全的，因为另一个参与者可能已经中止了。
 
-*Figure 9-10. The coordinator crashes after participants vote “yes.” Database 1 does not know whether to commit or abort.*
+*图9-10 在参与者们投了“赞成“票后协调员崩溃了。数据库1不知道是应该提交还是中止。*
 
-Without hearing from the coordinator, the participant has no way of knowing whether to commit or abort. In principle, the participants could communicate among themselves to find out how each participant voted and come to some agreement, but that is not part of the 2PC protocol.
+如果没有来自协调器的消息，参与者就无法知道是要提交还是中止。原则上，参与者可以相互交流，了解每个参与者是如何投票的并得出某种一致意见，但这并不是2PC协议的一部分。
 
-The only way 2PC can complete is by waiting for the coordinator to recover. This is why the coordinator must write its commit or abort decision to a transaction log on disk before sending commit or abort requests to participants: when the coordinator recovers, it determines the status of all in-doubt transactions by reading its transaction log. Any transactions that don’t have a commit record in the coordinator’s log are aborted. Thus, the commit point of 2PC comes down to a regular single-node atomic commit on the coordinator.
+2PC完成的唯一方法是等待协调器恢复。这就是为什么协调器在向参与者发送提交或中止请求之前必须将其提交或中止的决定写入磁盘上的事务日志的原因：当协调器恢复时，它将通过读取事务日志来确定所有不确定事务的状态。任何在协调器日志中没有提交记录的事务都将被中止。因此，2PC的提交点归结为协调器上的常规单节点原子提交。
 
-#### Three-phase commit
+#### 三阶段提交
 
-Two-phase commit is called a blocking atomic commit protocol due to the fact that 2PC can become stuck waiting for the coordinator to recover. In theory, it is possible to make an atomic commit protocol nonblocking, so that it does not get stuck if a node fails. However, making this work in practice is not so straightforward.
+两阶段提交被称为*阻塞*原子提交协议，因为2PC可能会陷入等待协调器恢复的状态。从理论上讲，使原子提交协议变得非阻塞是可能的，这样如果节点失效协议就不会被卡住。然而，在现实中实践它可不是那么简单。
 
-As an alternative to 2PC, an algorithm called three-phase commit (3PC) has been proposed [13, 80]. However, 3PC assumes a network with bounded delay and nodes with bounded response times; in most practical systems with unbounded network delay and process pauses (see Chapter   8), it cannot guarantee atomicity.
+作为2PC的替代方案，已经提出了一种称为三阶段提交（3PC）的算法。然而，3PC假设网络具有有界的延迟，节点具有有界的响应时间；在大多数有着无界网络延迟和进程暂停的实际系统中（参见第8章），它不能保证原子性。
 
-In general, nonblocking atomic commit requires a perfect failure detector [67, 71] — i.e., a reliable mechanism for telling whether a node has crashed or not. In a network with unbounded delay a timeout is not a reliable failure detector, because a request may time out due to a network problem even if no node has crashed. For this reason, 2PC continues to be used, despite the known problem with coordinator failure.
+一般来说，非阻塞原子提交需要一个完美的故障检测器——即一个可靠的机制来判断节点是否已经崩溃。在无界延迟的网络中，超时并不是可靠的故障检测器，因为即使没有节点崩溃，请求也可能因网络问题而超时。由于这个原因，2PC会继续使用，尽管已经知道问题是协调器失败。
