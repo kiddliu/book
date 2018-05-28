@@ -670,7 +670,7 @@ XA假设你的应用程序使用网络驱动程序或客户端库与参与者数
 
 为什么我们这么在意一笔事务卡在疑问状态呢？系统的其他部分就不能继续工作，直接忽略那些最终将被清理掉的疑问状态事务吗？
 
-问题在于锁定。正如在“提交读”一节中所讨论的，数据库事务通常对它们修改的任何行使用行级独占锁，以防止脏写。此外，如果您想要序列化的隔离，使用两阶段锁定的数据库也必须对事务读取的任何行使用共享锁（见“两阶段锁定（2PL）”一节）。
+问题在于锁定。正如在“提交读”一节中所讨论的，数据库事务通常对它们修改的任何行使用行级独占锁，以防止脏写。此外，如果你想要序列化的隔离，使用两阶段锁定的数据库也必须对事务读取的任何行使用共享锁（见“两阶段锁定（2PL）”一节）。
 
 在事务提交或中止（如图9-9所示的阴影区域）之前数据库是无法释放这些锁的。因此，在使用两阶段提交的时侯，事务必须在疑问状态期间始终持有锁。如果协调程序已经崩溃，并且花了20分钟才能再次启动，那么这些锁将被持有20分钟。如果协调程序的日志由于某种原因完全丢失，则这些锁将被永远持有——或者直到管理员手动解决此情况为止。
 
@@ -700,63 +700,65 @@ XA事务解决了让多个参与者数据系统相互一致的既真实又重要
 
 这些事实是否意味着我们应该放弃使几种系统相互一致的希望？不完全是——还有其他备选方案可以让我们实现同样的目标，但是不受异构分布式事务带来的痛苦。我们将在第11、12章中回到这些问题上。但是，首先，我们应该结束协商一致的这个主题。
 
-### Fault-Tolerant Consensus
+### 容错协商一致
 
-Informally, consensus means getting several nodes to agree on something. For example, if several people concurrently try to book the last seat on an airplane, or the same seat in a theater, or try to register an account with the same username, then a consensus algorithm could be used to determine which one of these mutually incompatible operations should be the winner.
+非正式地说，协商一致意味着让几个节点就某件事达成一致。例如，如果几个人同时尝试预订飞机上的最后一个座位，或是剧院中的同一个座位，或者尝试以相同的用户名注册一个帐户，那么可以使用协商一致的算法来确定这些互不兼容的操作中哪一个应该是赢家。
 
-The consensus problem is normally formalized as follows: one or more nodes may propose values, and the consensus algorithm decides on one of those values. In the seat-booking example, when several customers are concurrently trying to buy the last seat, each node handling a customer request may propose the ID of the customer it is serving, and the decision indicates which one of those customers got the seat.
+协商一致问题通常被形式化为：一个或多个节点会提出数个值，协商一致算法决定选择其中的一个值。在座位预订示例中，当多个客户同时试图购买最后一个座位时，处理客户请求的每个节点可能会提出它所服务的客户的ID，而决定指明这些客户中的哪一位获得了该座位。
 
-In this formalism, a consensus algorithm must satisfy the following properties [25]: xiii
+在这种形式中，一致性算法必须满足以下性质：
 
-Uniform agreement
+一致同意
 
-No two nodes decide differently.
+不会出现两个节点判断不同的情况。
 
-Integrity
+完整性
 
-No node decides twice.
+没有节点判断两次。
 
-Validity
+有效性
 
-If a node decides value v, then v was proposed by some node.
+如果节点判断值为*v*，那么同一个节点会提出值*v*。
 
-Termination
+终止性
 
-Every node that does not crash eventually decides some value.
+每一个没有崩溃的节点最终都会得出判断的某个值。
 
-The uniform agreement and integrity properties define the core idea of consensus: everyone decides on the same outcome, and once you have decided, you cannot change your mind. The validity property exists mostly to rule out trivial solutions: for example, you could have an algorithm that always decides null, no matter what was proposed; this algorithm would satisfy the agreement and integrity properties, but not the validity property.
+一致同意与完整性属性定义了协商一致的核心理念：每个人都决定了同样的结果，而且一旦决定了，你不能再改变你的想法了。有效性属性的存在主要是为了排除琐碎的解：例如，你可以有一个无论提出什么，都始终决定值为`null`的算法；这个算法可以满足一致性和完整性属性，但不满足有效性属性。
 
-If you don’t care about fault tolerance, then satisfying the first three properties is easy: you can just hardcode one node to be the “dictator,” and let that node make all of the decisions. However, if that one node fails, then the system can no longer make any decisions. This is, in fact, what we saw in the case of two-phase commit: if the coordinator fails, in-doubt participants cannot decide whether to commit or abort.
+如果你不关心容错，那么满足前三个属性很容易：你只需硬编码一个节点就可以成为“独裁者”，并让该节点做出所有决定。然而如果该节点失效，那么系统将无法作出任何决定。事实上，这就是我们在两阶段提交的情况下所看到的：如果协调器失败，处于疑问状态的参与者无法决定是提交还是中止。
 
-The termination property formalizes the idea of fault tolerance. It essentially says that a consensus algorithm cannot simply sit around and do nothing forever — in other words, it must make progress. Even if some nodes fail, the other nodes must still reach a decision. (Termination is a liveness property, whereas the other three are safety properties — see “Safety and liveness”.)
+终止性属性把容错理念形式化了。它本质上说，协商一致的算法不可能永远无所事事——换句话说，它必须推动事情进展。即使某些节点失效，其他节点也必须达成一致做出决定。（终止性是一种活跃度属性，而其他三种属性是安全属性——见“安全和活跃度”一节。）
 
-The system model of consensus assumes that when a node “crashes,” it suddenly disappears and never comes back. (Instead of a software crash, imagine that there is an earthquake, and the datacenter containing your node is destroyed by a landslide. You must assume that your node is buried under 30 feet of mud and is never going to come back online.) In this system model, any algorithm that has to wait for a node to recover is not going to be able to satisfy the termination property. In particular, 2PC does not meet the requirements for termination.
+协商一致的系统模型假设当节点“崩溃”的时候，它突然消失并且再也不会回来。（不是软件崩溃，而是假设发生了地震，包含节点的数据中心被山体滑坡摧毁。你必须假设你的节点被埋在30英尺的烂泥之下，永远不会恢复正常运行了。）在这种系统模型中，任何需要等待节点恢复的算法都无法满足终止性。尤其是，2PC不满足终止性的要求。
 
-Of course, if all nodes crash and none of them are running, then it is not possible for any algorithm to decide anything. There is a limit to the number of failures that an algorithm can tolerate: in fact, it can be proved that any consensus algorithm requires at least a majority of nodes to be functioning correctly in order to assure termination [67]. That majority can safely form a quorum (see “Quorums for reading and writing”).
+当然，如果所有节点崩溃，没有一个节点运行的话，那么任何算法都不可能决定任何事情。算法所能容忍的失效个数是有限度的：事实上可以证明，任何协商一致的算法都需要至少大多数节点才能正常工作，以确保终止性。大多数节点可以安全地构成仲裁团（见“读写仲裁”一节）。
 
-Thus, the termination property is subject to the assumption that fewer than half of the nodes are crashed or unreachable. However, most implementations of consensus ensure that the safety properties — agreement, integrity, and validity — are always met, even if a majority of nodes fail or there is a severe network problem [92]. Thus, a large-scale outage can stop the system from being able to process requests, but it cannot corrupt the consensus system by causing it to make invalid decisions.
+因此，终止属性是受制于少于一半的节点是崩溃的或无法到达的假设。然而，绝大多数协商一致的实现都确保安全属性——一致同意性、完整性和有效性——是始终得到满足的，哪怕大多数节点失败或存在严重的网络问题。因此，大规模的中断可以阻止系统处理请求，却无法破坏协商一致系统，使之做出无效的决定。
 
-Most consensus algorithms assume that there are no Byzantine faults, as discussed in “Byzantine Faults”. That is, if a node does not correctly follow the protocol (for example, if it sends contradictory messages to different nodes), it may break the safety properties of the protocol. It is possible to make consensus robust against Byzantine faults as long as fewer than one-third of the nodes are Byzantine-faulty [25, 93], but we don’t have space to discuss those algorithms in detail in this book.
+绝大多数协商一致的算法假设系统中没有拜占庭故障，如我们在“拜占庭故障”一节中所讨论的那样。也就是说，如果一个节点没有正确地遵守协议（比如，它向不同的节点发送互相矛盾的消息)，它会破坏协议的安全属性。只要有拜占庭故障的节点少于总数的三分之一，我们就有可能使协商一致算法对拜占庭故障足够健壮，但是由于篇幅问题，我们在本书中不会详细讨论这些算法。
 
-#### Consensus algorithms and total order broadcast
+#### 协商一致算法与全序广播
 
-The best-known fault-tolerant consensus algorithms are Viewstamped Replication (VSR) [94, 95], Paxos [96, 97, 98, 99], Raft [22, 100, 101], and Zab [15, 21, 102]. There are quite a few similarities between these algorithms, but they are not the same [103]. In this book we won’t go into full details of the different algorithms: it’s sufficient to be aware of some of the high-level ideas that they have in common, unless you’re implementing a consensus system yourself (which is probably not advisable — it’s hard [98, 104]).
+最著名的容错协商一致算法是视图标记复制（VSR）、Paxos、Raft和Zab。这些算法之间有不少相似之处，但它们并不相同。在这本书里，我们不会详细地介绍这些不同的算法：只要了解它们的一些共有的高层次想法就足够了，除非你自己正在实现一个协商一致系统（也许这样做并不可取——很难）。
 
-Most of these algorithms actually don’t directly use the formal model described here (proposing and deciding on a single value, while satisfying the agreement, integrity, validity, and termination properties). Instead, they decide on a sequence of values, which makes them total order broadcast algorithms, as discussed previously in this chapter (see “Total Order Broadcast”).
+这些算法中的大多数实际上不直接使用这里描述的形式模型（建议并决定单个值，同时满足一致同意、完整性、有效性和终止性）。相反，他们决定一系列的值，这使得它们成为全序广播算法，如我们之前在本章所讨论的（见“全序广播”一节）。
 
-Remember that total order broadcast requires messages to be delivered exactly once, in the same order, to all nodes. If you think about it, this is equivalent to performing several rounds of consensus: in each round, nodes propose the message that they want to send next, and then decide on the next message to be delivered in the total order [67].
+记住，全序广播要求消息以相同的顺序准确地只给所有节点传递一次。想一想，这相当于执行了好几轮协商一致：在每一轮中，节点提出它们想要发送的下一个消息，然后决定下一个按全序发送的消息。
+
+因此，全序广播相当于重复几轮的协商一致（每个协商一致的决定对应一次消息传递）
 
 So, total order broadcast is equivalent to repeated rounds of consensus (each consensus decision corresponding to one message delivery):
 
-* Due to the agreement property of consensus, all nodes decide to deliver the same messages in the same order.
+* 由于协商一致的一致同意性质，所有节点都决定按照相同的顺序传递相同的消息。
 
-* Due to the integrity property, messages are not duplicated.
+* 由于完整性，消息不会重复。
 
-* Due to the validity property, messages are not corrupted and not fabricated out of thin air.
+* 由于有效性，讯息不会被破坏，也不会凭空捏造。
 
-* Due to the termination property, messages are not lost.
+* 由于终止性，消息不会丢失。
 
-Viewstamped Replication, Raft, and Zab implement total order broadcast directly, because that is more efficient than doing repeated rounds of one-value-at-a-time consensus. In the case of Paxos, this optimization is known as Multi-Paxos.
+视图标记复制、Raft和Zab直接实现了全序广播，因为这比重复许多轮的、一次一个值的协商一致更有效率。在Paxos中，这种优化称为多Paxos。
 
 #### Single-leader replication and consensus
 
