@@ -760,44 +760,44 @@ So, total order broadcast is equivalent to repeated rounds of consensus (each co
 
 视图标记复制、Raft和Zab直接实现了全序广播，因为这比重复许多轮的、一次一个值的协商一致更有效率。在Paxos中，这种优化称为多Paxos。
 
-#### Single-leader replication and consensus
+#### 单主机的复制与协商一致
 
-In Chapter   5 we discussed single-leader replication (see “Leaders and Followers”), which takes all the writes to the leader and applies them to the followers in the same order, thus keeping replicas up to date. Isn’t this essentially total order broadcast? How come we didn’t have to worry about consensus in Chapter   5?
+在第5章中，我们讨论了单主机的复制（见“主机与从机”一节），它所有的写入都发生在主机上并把它们以同样的顺序应用到从机上，从而使副本保持最新。这不就是全序广播吗？为什么在第5章我们没有担心协商一致问题？
 
-The answer comes down to how the leader is chosen. If the leader is manually chosen and configured by the humans in your operations team, you essentially have a “consensus algorithm” of the dictatorial variety: only one node is allowed to accept writes (i.e., make decisions about the order of writes in the replication log), and if that node goes down, the system becomes unavailable for writes until the operators manually configure a different node to be the leader. Such a system can work well in practice, but it does not satisfy the termination property of consensus because it requires human intervention in order to make progress.
+答案在于主机是如何被选出来的。如果你的运营团队人员手动选择并配置了主机，实际上你有一个独裁的“协商一致算法”：只允许一个节点接受写入(即，对复制日志中的写入顺序作出决定)，如果该节点发生故障，系统将无法写入，直到运维人员手动配置另一个节点为主机为止。这种系统在实践中可以正常工作，但是因为它需要人们的干预才能取得进展，它不满足协商一致中的终止性，。
 
-Some databases perform automatic leader election and failover, promoting a follower to be the new leader if the old leader fails (see “Handling Node Outages”). This brings us closer to fault-tolerant total order broadcast, and thus to solving consensus.
+一些数据库自动执行主机选举和故障转移，一旦旧主机失效就提升一个从机成为新主机（见“处理节点中断”一节）。这使我们更接近于容错的全序广播，从而解决协商一致问题。
 
-However, there is a problem. We previously discussed the problem of split brain, and said that all nodes need to agree who the leader is — otherwise two different nodes could each believe themselves to be the leader, and consequently get the database into an inconsistent state. Thus, we need consensus in order to elect a leader. But if the consensus algorithms described here are actually total order broadcast algorithms, and total order broadcast is like single-leader replication, and single-leader replication requires a leader, then…
+然而，这里有个问题。我们之前讨论过裂脑的问题，而且说所有的节点都需要同意谁是主机——否则两个不同的节点都相信自己才是主机，并因此使数据库进入一个不一致的状态。因此，我们需要协商一致算法以选出一个主机。但是，如果这里描述的协商一致算法实际上是全阶广播算法，而全序广播与单主机复制类似，而单主机复制需要一台主机，那么。。。
 
-It seems that in order to elect a leader, we first need a leader. In order to solve consensus, we must first solve consensus. How do we break out of this conundrum?
+看上去要选出一台主机，我们首先需要一台主机。要解决协商一致，首先要解决协商一致。我们怎么才能摆脱这个难题呢？
 
-#### Epoch numbering and quorums
+#### 时期编号与仲裁
 
-All of the consensus protocols discussed so far internally use a leader in some form or another, but they don’t guarantee that the leader is unique. Instead, they can make a weaker guarantee: the protocols define an epoch number (called the ballot number in Paxos, view number in Viewstamped Replication, and term number in Raft) and guarantee that within each epoch, the leader is unique.
+到目前为止讨论的所有协商一致的协议都在内部使用了某种形式的主机，但它们并不保证主机是独一无二的。取而代之的是，它们可以提供一个较弱的保证：协议定义了一个*时期编号*（在Paxos中叫做*选票编号*，在视图标记复制中叫做*视图编号*，在Raft中叫做*术语编号*）并保证在每个时期里，主机是唯一的。
 
-Every time the current leader is thought to be dead, a vote is started among the nodes to elect a new leader. This election is given an incremented epoch number, and thus epoch numbers are totally ordered and monotonically increasing. If there is a conflict between two different leaders in two different epochs (perhaps because the previous leader actually wasn’t dead after all), then the leader with the higher epoch number prevails.
+每一次当前主机被认为已经失效了，就会在节点间开始投票选举新的主机。选举给定了一个递增的时期编号，从而使时期编号完全有序且单调增加。如果两台不同的主机在两个不同的时期发生了冲突（也许是因为前一台主机实际上并没有失效），那么具有较高时期编号的主机占上风。
 
-Before a leader is allowed to decide anything, it must first check that there isn’t some other leader with a higher epoch number which might take a conflicting decision. How does a leader know that it hasn’t been ousted by another node? Recall “The Truth Is Defined by the Majority”: a node cannot necessarily trust its own judgment — just because a node thinks that it is the leader, that does not necessarily mean the other nodes accept it as their leader.
+在允许主机做出任何决定之前，必须先检查是否有其他具有较高时期编号的主机，如果存在它可能会做出相互矛盾的决定。一台主机怎么知道它没有被另一个节点驱逐呢？回想一下“真理是由多数人定义的”一节：一个节点并不一定相信自己的判断——仅仅因为一个节点认为它是主机，这并不一定意味着其他节点接受它作为它们的主机。
 
-Instead, it must collect votes from a quorum of nodes (see “Quorums for reading and writing”). For every decision that a leader wants to make, it must send the proposed value to the other nodes and wait for a quorum of nodes to respond in favor of the proposal. The quorum typically, but not always, consists of a majority of nodes [105]. A node votes in favor of a proposal only if it is not aware of any other leader with a higher epoch.
+取而代之的是，它必须从由众多节点构成的仲裁团那里收集选票（见“读写的仲裁”一节）。对于主机想要做出的每一个决定，它都必须将建议的值发送给其他节点，并等待一定数量仲裁团的节点对建议做出响应。仲裁团通常，但并非总是，由大多数节点组成。节点只有在没有意识到有任何其他具有更高时期编号的主机时才投票支持提议。
 
-Thus, we have two rounds of voting: once to choose a leader, and a second time to vote on a leader’s proposal. The key insight is that the quorums for those two votes must overlap: if a vote on a proposal succeeds, at least one of the nodes that voted for it must have also participated in the most recent leader election [105]. Thus, if the vote on a proposal does not reveal any higher-numbered epoch, the current leader can conclude that no leader election with a higher epoch number has happened, and therefore be sure that it still holds the leadership. It can then safely decide the proposed value.
+因此有了两轮投票：一次选举一台主机，另一次投票表决主机的提议。至关重要的认识是这两次投票的仲裁团必须重叠：如果对提议进行的表决成功了，那么投票赞成该提议的节点中至少有一个也必须参加了最近对主机的选举。因此，如果对提议的表决没有显示出任何具有更高编号的时期，当前主机就可以得出结论，没有发生过任何具有更高时期编号的主机选举，也因此确保了它仍然保有主机地位。之后它可以安全地决定建议的值。
 
-This voting process looks superficially similar to two-phase commit. The biggest differences are that in 2PC the coordinator is not elected, and that fault-tolerant consensus algorithms only require votes from a majority of nodes, whereas 2PC requires a “yes” vote from every participant. Moreover, consensus algorithms define a recovery process by which nodes can get into a consistent state after a new leader is elected, ensuring that the safety properties are always met. These differences are key to the correctness and fault tolerance of a consensus algorithm.
+这个投票过程从表面上看类似于两阶段提交。最大的区别在于，在2PC中协调员不是通过选举产生的；而且容错协商一致算法只需要来自大多数节点的投票，但是2PC需要每个参与者投赞成票。此外，协商一致的算法定义了一个恢复流程，通过这个流程，节点可以在选出新的主机后进入一致的状态，从而确保安全特性始终得到满足。这些差异是协商一致算法正确性和容错的关键。
 
-#### Limitations of consensus
+#### 协商一致的限制
 
-Consensus algorithms are a huge breakthrough for distributed systems: they bring concrete safety properties (agreement, integrity, and validity) to systems where everything else is uncertain, and they nevertheless remain fault-tolerant (able to make progress as long as a majority of nodes are working and reachable). They provide total order broadcast, and therefore they can also implement linearizable atomic operations in a fault-tolerant way (see “Implementing linearizable storage using total order broadcast”).
+对于分布式系统来说，协商一致算法是一个巨大的突破：它们给其他一切都不确定的系统带来了实实在在的安全特性（一致同意、完整性和有效性），而且它们仍然是容错的（只要大多数节点还在正常工作并且可以到达，就可以取得进展)。它们提供全序广播，因此它们还可以容错的方式实现线性化的原子操作（见“利用全序广播实现线性化存储”一节）。
 
-Nevertheless, they are not used everywhere, because the benefits come at a cost.
+然而，并不是所有的地方都在使用它们，因为它们的好处是有代价的。
 
-The process by which nodes vote on proposals before they are decided is a kind of synchronous replication. As discussed in “Synchronous Versus Asynchronous Replication”, databases are often configured to use asynchronous replication. In this configuration, some committed data can potentially be lost on failover — but many people choose to accept this risk for the sake of better performance.
+提议在决定之前由节点投票的流程是一种同步复制。正如“同步 vs 异步复制”一节，数据库通常被配置为使用异步复制。在这种配置中，一些已经提交了的数据可能会在故障转移中丢失——但是为了更好的性能，许多人选择接受这种风险。
 
-Consensus systems always require a strict majority to operate. This means you need a minimum of three nodes in order to tolerate one failure (the remaining two out of three form a majority), or a minimum of five nodes to tolerate two failures (the remaining three out of five form a majority). If a network failure cuts off some nodes from the rest, only the majority portion of the network can make progress, and the rest is blocked (see also “The Cost of Linearizability”).
+协商一致系统总是需要严格多数（的节点）才能运作。这意味着你需要至少三个节点才能容忍一个失效节点（三个节点中的其余两个构成了多数），或者至少需要五个节点来容忍两个失效节点（五个节点中的其余三个节点占多数）。如果网络故障把某些节点与其他节点隔开了，那么只有网络中由多数节点构成的部分才能够取得进展，而剩余部分将被阻塞（另见“线性化的代价”一节）。
 
-Most consensus algorithms assume a fixed set of nodes that participate in voting, which means that you can’t just add or remove nodes in the cluster. Dynamic membership extensions to consensus algorithms allow the set of nodes in the cluster to change over time, but they are much less well understood than static membership algorithms.
+绝大多数协商一致的算法假定参与投票的节点数量是固定的，这意味着你不能添加或删除集群中的节点。协商一致算法的动态成员扩展允许集群中的节点集合随时间而变化，但与静态成员算法相比，现在对它们的理解要少得多。
 
-Consensus systems generally rely on timeouts to detect failed nodes. In environments with highly variable network delays, especially geographically distributed systems, it often happens that a node falsely believes the leader to have failed due to a transient network issue. Although this error does not harm the safety properties, frequent leader elections result in terrible performance because the system can end up spending more time choosing a leader than doing any useful work.
+协商一致的系统通常依靠超时来检测失效的节点。在具有高度可变网络延迟的环境中，特别是在地理位置上分散的系统中，经常会发生由于暂时的网络问题导致节点错误地认为主机失效的情况。虽然这样的错误不会损害安全性，但是频繁的主机选举会导致糟糕的性能，因为系统最终可能会花费更多的时间来选择主机，而不是做任何有用的工作。
 
-Sometimes, consensus algorithms are particularly sensitive to network problems. For example, Raft has been shown to have unpleasant edge cases [106]: if the entire network is working correctly except for one particular network link that is consistently unreliable, Raft can get into situations where leadership continually bounces between two nodes, or the current leader is continually forced to resign, so the system effectively never makes progress. Other consensus algorithms have similar problems, and designing algorithms that are more robust to unreliable networks is still an open research problem.
+有的时候，协商一致算法对网络问题特别敏感。例如，Raft被证明有令人不快的极端场景：如果整个网络都可以正常工作，而只有一个特定网络链路始终不可靠，Raft可能会陷入主机地位在两个节点之间不断地变换，或者当前主机不断被迫辞职的情况，导致系统实际上从未取得进展。其他协商一致的算法也有类似的问题，而针对不可靠网络设计更健壮的算法仍然是一个有待研究的问题。
