@@ -802,35 +802,37 @@ So, total order broadcast is equivalent to repeated rounds of consensus (each co
 
 有的时候，协商一致算法对网络问题特别敏感。例如，Raft被证明有令人不快的极端场景：如果整个网络都可以正常工作，而只有一个特定网络链路始终不可靠，Raft可能会陷入主机地位在两个节点之间不断地变换，或者当前主机不断被迫辞职的情况，导致系统实际上从未取得进展。其他协商一致的算法也有类似的问题，而针对不可靠网络设计更健壮的算法仍然是一个有待研究的问题。
 
-### Membership and Coordination Services
+### 成员关系与协调服务
 
-Projects like ZooKeeper or etcd are often described as “distributed key-value stores” or “coordination and configuration services.” The API of such a service looks pretty much like that of a database: you can read and write the value for a given key, and iterate over keys. So if they’re basically databases, why do they go to all the effort of implementing a consensus algorithm? What makes them different from any other kind of database?
+像ZooKeeper或者etcd这样的项目通常被描述为“分布式键值对存储”，或者是“协调和配置服务”。这种服务的API看起来很像数据库的API：你可以读取和写入给定键的值，并对键进行遍历。那么如果它们基本上算是数据库的话，那么为什么它们要竭尽全力实现一个一致的算法呢？是什么使它们不同于其他类型数据库的？
 
-To understand this, it is helpful to briefly explore how a service like ZooKeeper is used. As an application developer, you will rarely need to use ZooKeeper directly, because it is actually not well suited as a general-purpose database. It is more likely that you will end up relying on it indirectly via some other project: for example, HBase, Hadoop YARN, OpenStack Nova, and Kafka all rely on ZooKeeper running in the background. What is it that these projects get from it?
+为了理解这一点，简要地探讨一下像ZooKeeper这样的服务是如何使用的会很有帮助的。作为一名应用程序开发者，你很少需要直接使用ZooKeeper，因为它实际上并不适合作为一个通用数据库。更有可能的是，你将通过其他项目间接依赖它：例如，HBase、Hadoop YARN、OpenStack Nova以及Kafka都依赖后台运行的ZooKeeper。这些项目从它那里得到了什么？
 
-ZooKeeper and etcd are designed to hold small amounts of data that can fit entirely in memory (although they still write to disk for durability) — so you wouldn’t want to store all of your application’s data here. That small amount of data is replicated across all the nodes using a fault-tolerant total order broadcast algorithm. As discussed previously, total order broadcast is just what you need for database replication: if each message represents a write to the database, applying the same writes in the same order keeps replicas consistent with each other.
+ZooKeeper和etcd被设计用来保存少量的数据，这些数据可以完全存储在内存中（尽管为了持久性它们仍然会写入磁盘）——所以你不会想把应用程序所有的数据都存在这里的。这些少量的数据使用容错的全序广播算法在所有节点上复制。如前面所描述的，全序广播正是数据库复制所需的：如果每一条消息表示了对数据库的一次写入，那么以相同的顺序应用相同的写入可以使副本彼此保持一致。
 
-ZooKeeper is modeled after Google’s Chubby lock service [14, 98], implementing not only total order broadcast (and hence consensus), but also an interesting set of other features that turn out to be particularly useful when building distributed systems:
+ZooKeeper是以谷歌的Chubby锁服务为模型的，不仅实现了全序广播（因而实现了协商一致），还实现了一组有趣的其他特性，它们在构建分布式系统时特别有用：
 
-Linearizable atomic operations
+*线性化原子操作*
 
-Using an atomic compare-and-set operation, you can implement a lock: if several nodes concurrently try to perform the same operation, only one of them will succeed. The consensus protocol guarantees that the operation will be atomic and linearizable, even if a node fails or the network is interrupted at any point. A distributed lock is usually implemented as a lease, which has an expiry time so that it is eventually released in case the client fails (see “Process Pauses”).
+使用原子比较后设置操作，你可以实现一个锁：如果几个节点同时尝试执行相同的操作，那么其中只有一个节点会成功。协商一致协议保证操作是原子的和线性化的，即使节点失效，或是网络在任何时间点中断。分布式锁通常实现为租约，它有一个过期时间，以便在客户端失效时最终被释放（见“进程暂停”一节）。
 
-Total ordering of operations
+*全序操作*
 
-As discussed in “The leader and the lock”, when some resource is protected by a lock or lease, you need a fencing token to prevent clients from conflicting with each other in the case of a process pause. The fencing token is some number that monotonically increases every time the lock is acquired. ZooKeeper provides this by totally ordering all operations and giving each operation a monotonically increasing transaction ID (zxid) and version number (cversion) [15].
+正如“主机与锁”一节中所讨论的，当某些资源受到锁或租约的保护时，你需要栅栏令牌来防止客户端在进程暂停的情况下发生冲突。栅栏令牌是锁每次被获取时单调增加的某个数字。ZooKeeper通过对所有操作进行全序排序、并给每个操作一个单调增加的事务ID（`zxid`）和版本号（`cversion`）来提供它。
 
-Failure detection
+*失效检测*
 
-Clients maintain a long-lived session on ZooKeeper servers, and the client and server periodically exchange heartbeats to check that the other node is still alive. Even if the connection is temporarily interrupted, or a ZooKeeper node fails, the session remains active. However, if the heartbeats cease for a duration that is longer than the session timeout, ZooKeeper declares the session to be dead. Any locks held by a session can be configured to be automatically released when the session times out (ZooKeeper calls these ephemeral nodes).
+客户端与ZooKeeper服务器之间维护一个长时间会话，客户端和服务器定期交换心跳以检查对方是否仍然运行着。即使连接暂时中断，或者ZooKeeper节点失效，会话仍然处于活动状态。然而，如果心跳停止的时间超过了会话的超时时间，ZooKeeper会宣布会话结束。会话所持有的任何锁都可以配置为会话超时之后自动释放（ZooKeeper把这些叫做*临时节点*）。
 
-Change notifications
+*变更通知*
 
-Not only can one client read locks and values that were created by another client, but it can also watch them for changes. Thus, a client can find out when another client joins the cluster (based on the value it writes to ZooKeeper), or if another client fails (because its session times out and its ephemeral nodes disappear). By subscribing to notifications, a client avoids having to frequently poll to find out about changes.
+一个客户端不仅可以读取由另一个客户端创建的锁和值，而且还可以监视它们的变更。因此，客户端可以知道另一个客户端什么时候加入集群（基于它写入ZooKeeper的值），或者是另一个客户端是否失败（因为它的会话超时，它的临时节点消失了）。通过订阅通知，客户端避免了频繁轮询来查找变更。
 
-Of these features, only the linearizable atomic operations really require consensus. However, it is the combination of these features that makes systems like ZooKeeper so useful for distributed coordination.
+在这些特性中，只有线性化原子操作才需要协商一致。然而，正是这些特性的结合使得像ZooKeeper这样的系统对于分布式协调这么有用。
 
-#### Allocating work to nodes
+#### 给节点分配任务
+
+ZooKeeper/Chubby模型运行良好的一个例子是，如果你有几个流程或服务的实例，而其中一个实例需要被选为主机或主要实例。如果主机失效，其他节点中的一个将接管。当然，这对于单主机数据库当然很有用，对于作业调度器和类似的有状态系统也是一样的。
 
 One example in which the ZooKeeper/ Chubby model works well is if you have several instances of a process or service, and one of them needs to be chosen as leader or primary. If the leader fails, one of the other nodes should take over. This is of course useful for single-leader databases, but it’s also useful for job schedulers and similar stateful systems.
 
