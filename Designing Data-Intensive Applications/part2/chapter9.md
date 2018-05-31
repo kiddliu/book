@@ -848,7 +848,7 @@ ZooKeeper、etcd和Consul也经常用于服务发现——也就是，找出需�
 
 然而还不是很清楚服务发现实际上是否需要协商一致。DNS是查找服务名称IP地址的传统方法，它使用多层缓存来实现良好的性能和可用性。来自DNS的读取绝对不是可线性化的，如果DNS的查询结果有点陈旧，通常不会认为是有问题的。更重要的是，DNS是可靠的可用的以及对网络中断的健壮性。
 
-虽然服务发现不需要协商一致，但主机选举需要。因此，如果您的协商一致系统已经知道谁是主机，那么也可以使用这些信息来帮助其他服务发现主机是谁。为此，一些协商一致的系统支持只读缓存副本。这些副本异步地接收协商一致算法所有决策的日志，但不积极参与投票。因此，它们能够为不需要是线性化的读取请求提供服务。
+虽然服务发现不需要协商一致，但主机选举需要。因此，如果你的协商一致系统已经知道谁是主机，那么也可以使用这些信息来帮助其他服务发现主机是谁。为此，一些协商一致的系统支持只读缓存副本。这些副本异步地接收协商一致算法所有决策的日志，但不积极参与投票。因此，它们能够为不需要是线性化的读取请求提供服务。
 
 #### 成员服务
 
@@ -858,56 +858,56 @@ ZooKeeper和同类产品可以被看作是成员服务研究悠久历史的一�
 
 这样还是会发生节点被错误地以协商一致的方式宣布失效的情况，即使节点实际上还可用。但是对于一个系统来说，就哪些节点构成当前成员的问题达成一致是非常有用的。例如，选择一个主机可能就是意味着选择当前成员中编号最低的一个，但是如果不同的节点对当前成员都是谁有不同的意见的话，这种方法就行不通。
 
-## Summary
+## 小结
 
-In this chapter we examined the topics of consistency and consensus from several different angles. We looked in depth at linearizability, a popular consistency model: its goal is to make replicated data appear as though there were only a single copy, and to make all operations act on it atomically. Although linearizability is appealing because it is easy to understand — it makes a database behave like a variable in a single-threaded program — it has the downside of being slow, especially in environments with large network delays.
+在本章中，我们从几个不同的角度考察了一致性和协商一致的主题。我们深入研究了线性化，一种流行的一致性模型：它的目标是使复制的数据看起来好像只有一个副本，并使所有操作都原子化。虽然线性化很吸引人，因为它很容易理解——它使数据库在单线程程序中表现得像一个变量——但是它有慢的缺点，特别是在网络延迟较大的环境中。
 
-We also explored causality, which imposes an ordering on events in a system (what happened before what, based on cause and effect). Unlike linearizability, which puts all operations in a single, totally ordered timeline, causality provides us with a weaker consistency model: some things can be concurrent, so the version history is like a timeline with branching and merging. Causal consistency does not have the coordination overhead of linearizability and is much less sensitive to network problems.
+我们还探讨了因果关系，它对系统中的事件（什么发生在什么之前，基于因果的）带来了顺序。与线性化将所有操作放在一个单一的、有序的时间线中不同，因果关系为我们提供了一个较弱的一致性模型：有些东西可以是并发的，因此版本历史就像一个具有分支与合并动作的时间线。因果一致性没有线性化导致的协调开销，对网络问题的敏感性也要小得多。
 
-However, even if we capture the causal ordering (for example using Lamport timestamps), we saw that some things cannot be implemented this way: in “Timestamp ordering is not sufficient” we considered the example of ensuring that a username is unique and rejecting concurrent registrations for the same username. If one node is going to accept a registration, it needs to somehow know that another node isn’t concurrently in the process of registering the same name. This problem led us toward consensus.
+然而，即使我们捕获因果排序（比如使用兰波特时间戳），我们也发现有些事情不能以这种方式实现：在“时间戳排序是不够的”一节中，我们考虑了确保用户名是唯一的并且拒绝对同一个用户名进行的并发注册的例子。如果一个节点要接受注册，某种程度上它需要知道另一个节点没有并发地在注册相同名称。这个问题带来协商一致问题。
 
-We saw that achieving consensus means deciding something in such a way that all nodes agree on what was decided, and such that the decision is irrevocable. With some digging, it turns out that a wide range of problems are actually reducible to consensus and are equivalent to each other (in the sense that if you have a solution for one of them, you can easily transform it into a solution for one of the others). Such equivalent problems include:
+我们看到，达成协商一致意味着以所有节点都同意的方式所决定内容，而且这样的决定是不可撤销的。通过深入挖掘，我们发现各种各样的问题实际上都可以归结为协商一致问题，并且是等价的(也就是说，如果你有其中一个问题的解决方案，你可以很容易地把它转化为其它问题的解决方案)。类似的等价问题包括：
 
-Linearizable compare-and-set registers
+*线性化比较后设置寄存器*
 
-The register needs to atomically decide whether to set its value, based on whether its current value equals the parameter given in the operation.
+寄存器需要根据其当前值是否等于操作中给定的参数来原子地决定是否设置其值。
 
-Atomic transaction commit
+*原子事务提交*
 
-A database must decide whether to commit or abort a distributed transaction.
+数据库必须决定是否提交或中止分布式事务。
 
-Total order broadcast
+*全序广播*
 
-The messaging system must decide on the order in which to deliver messages.
+消息系统必须决定传递消息的顺序。
 
-Locks and leases
+*锁与租约*
 
-When several clients are racing to grab a lock or lease, the lock decides which one successfully acquired it.
+当几个客户端争抢锁或租约时，锁决定哪个客户端成功地获得了它。
 
-Membership/ coordination service
+*成员服务/协调服务*
 
-Given a failure detector (e.g., timeouts), the system must decide which nodes are alive, and which should be considered dead because their sessions timed out.
+给定故障检测器（例如超时），系统必须决定哪些节点是活动的，哪些节点因为它们的会话超时于是应该被认为失效了。
 
-Uniqueness constraint
+*唯一性约束条件*
 
-When several transactions concurrently try to create conflicting records with the same key, the constraint must decide which one to allow and which should fail with a constraint violation.
+好几个事务同时尝试使用相同的键创建相互冲突的记录时，约束条件必须决定哪一项记录是允许的而哪些因为违反约束条件而应该失败。
 
-All of these are straightforward if you only have a single node, or if you are willing to assign the decision-making capability to a single node. This is what happens in a single-leader database: all the power to make decisions is vested in the leader, which is why such databases are able to provide linearizable operations, uniqueness constraints, a totally ordered replication log, and more.
+如果你只有单个节点，或者你愿意把决策功能分配给单个节点，那么所有这些都很好理解。这就是单主机数据库中发生的事情：所有决策的权力属于主机，这就是为什么这样的数据库能够提供线性化的操作、唯一性约束条件、全序的复制日志等等。
 
-However, if that single leader fails, or if a network interruption makes the leader unreachable, such a system becomes unable to make any progress. There are three ways of handling that situation:
+然而如果单主机失效了，或者网络中断使主机无法访问，这样的系统将无法取得任何进展。有三种处理这种情况的方法：
 
-1. Wait for the leader to recover, and accept that the system will be blocked in the meantime. Many XA/ JTA transaction coordinators choose this option. This approach does not fully solve consensus because it does not satisfy the termination property: if the leader does not recover, the system can be blocked forever.
+1. 等待主机恢复，接受系统将在此期间阻塞的事实。许多XA/JTA事务协调器选择这样做。这种方法不能完全解决协商一致问题，因为它不满足终止属性：如果主机不恢复，系统可能永远阻塞住。
 
-2. Manually fail over by getting humans to choose a new leader node and reconfigure the system to use it. Many relational databases take this approach. It is a kind of consensus by “act of God” — the human operator, outside of the computer system, makes the decision. The speed of failover is limited by the speed at which humans can act, which is generally slower than computers.
+2. 手动故障迁移：通过人为选择新主机节点，并重新配置系统使用新主机。许多关系型数据库都采用这种方法。这是一种由“上帝的行为”达成的协商一致——由计算机系统之外的运维人员来做出决定。故障转移的速度受运维人员行动速度的限制，这通常比计算机慢。
 
-3. Use an algorithm to automatically choose a new leader. This approach requires a consensus algorithm, and it is advisable to use a proven algorithm that correctly handles adverse network conditions [107].
+3. 使用算法自动地选择新的主机。这种方法需要协商一致算法，并且最好使用一种经过验证的算法来正确地处理不友好的网络环境。
 
-Although a single-leader database can provide linearizability without executing a consensus algorithm on every write, it still requires consensus to maintain its leadership and for leadership changes. Thus, in some sense, having a leader only “kicks the can down the road”: consensus is still required, only in a different place, and less frequently. The good news is that fault-tolerant algorithms and systems for consensus exist, and we briefly discussed them in this chapter.
+虽然单主机数据库可以提供线性化，无需在每次写入时执行协商一致的算法，然而它仍然需要协商一致才能维持它的主机地位以及主机地位改变的情况。因此从某种意义上说，只有单台主机“一意孤行”：仍然需要达成协商一致，只是发生在不同的地方，而且没有那么频繁。好消息是，容错算法和协商一致的系统已经有了，我们在这一章里对它们进行了简要的讨论。
 
-Tools like ZooKeeper play an important role in providing an “outsourced” consensus, failure detection, and membership service that applications can use. It’s not easy to use, but it is much better than trying to develop your own algorithms that can withstand all the problems discussed in Chapter   8. If you find yourself wanting to do one of those things that is reducible to consensus, and you want it to be fault-tolerant, then it is advisable to use something like ZooKeeper.
+像ZooKeeper这样的工具在提供应用程序可以使用的“外包”协商一致算法、故障检测和成员服务诸多方面发挥着重要作用。它不容易使用，但是比尝试开发自己的算法要好得多，这些算法能够经受住第8章中讨论的所有问题的考验。如果你发现自己想要做一件可以转化为协商一致的事情，而且你希望它是可以容错的，那么最好使用诸如ZooKeeper这样的东西。
 
-Nevertheless, not every system necessarily requires consensus: for example, leaderless and multi-leader replication systems typically do not use global consensus. The conflicts that occur in these systems (see “Handling Write Conflicts”) are a consequence of not having consensus across different leaders, but maybe that’s okay: maybe we simply need to cope without linearizability and learn to work better with data that has branching and merging version histories.
+然而并不是每个系统都必然需要协商一致：例如，无主机和多主机复制系统通常不使用全局协商一致。在这些系统中发生的冲突（见“处理写入冲突”一节）是不同主机之间没有进行协商一致的结果，但也许这是可以接受的：也许我们只需要在没有线性化的情况下进行处理，并且学会更好地处理具有分支和合并动作版本历史的数据。
 
-This chapter referenced a large body of research on the theory of distributed systems. Although the theoretical papers and proofs are not always easy to understand, and sometimes make unrealistic assumptions, they are incredibly valuable for informing practical work in this field: they help us reason about what can and cannot be done, and help us find the counterintuitive ways in which distributed systems are often flawed. If you have the time, the references are well worth exploring.
+本章引用了分布式系统理论的大量研究成果。虽然理论论文和证明并不总是容易理解，而且有的时侯也会做出不切实际的假设，但是它们为这一领域实际工作提供的信息是非常有价值的：它们帮助我们解释什么可以做什么不能做，并帮助我们找到分布式系统经常存在缺陷的违反直觉的方式。如果你有时间的话，这些参考资料是很值得探索的。
 
-This brings us to the end of Part   II of this book, in which we covered replication (Chapter   5), partitioning (Chapter   6), transactions (Chapter   7), distributed system failure models (Chapter   8), and finally consistency and consensus (Chapter   9). Now that we have laid a firm foundation of theory, in Part   III we will turn once again to more practical systems, and discuss how to build powerful applications from heterogeneous building blocks.
+我们来到了这本书第二部分的结尾，在这一部分我们讨论了复制（第5章）、分区（第6章）、事务（第7章）、分布式系统故障模型（第8章）以及最后的一致性和协商一致（第9章）。现在我们已经奠定了坚实的理论基础，在第三部分中，我们将再次转向更实际的系统，并讨论如何用异构的基础模块构建强大的应用程序。
