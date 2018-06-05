@@ -132,20 +132,36 @@ GNU Coreutils (Linux)中的`sort`程序通过溢出到磁盘自动处理大于�
 
 ### Unix哲学
 
-It’s no coincidence that we were able to analyze a log file quite easily, using a chain of commands like in the previous example: this was in fact one of the key design ideas of Unix, and it remains astonishingly relevant today. Let’s look at it in some more depth so that we can borrow some ideas from Unix [10].
+我们能够很容易地使用前面示例中的一系列命令来分析日志文件，这并不是巧合：实际上，这是Unix的关键设计思想之一，今天它仍然具有惊人的相关性。让我们更深入地研究它，方便我们可以从Unix中借鉴一些点子。
 
-Doug McIlroy, the inventor of Unix pipes, first described them like this in 1964 [11]: “We should have some ways of connecting programs like [a] garden hose — screw in another segment when it becomes necessary to massage data in another way. This is the way of I/ O also.” The plumbing analogy stuck, and the idea of connecting programs with pipes became part of what is now known as the Unix philosophy — a set of design principles that became popular among the developers and users of Unix. The philosophy was described in 1978 as follows [12, 13]:
+道格拉斯·麦克罗伊，Unix管道的发明者，在1964年第一次这样描述它们：“我们应该有一些连接程序的方法，就像花园里浇水的软管一样——当必须以另一种方式修改数据的时候就再接入另一段（软管）。I/O也是同样的方式。”水管的比喻非常成功，用管道连接程序的理念成为了现在被称为Unix哲学的一部分——一套在Unix开发人员和用户中流行的设计原则。这一哲学在1978年被描述如下：
 
-1. Make each program do one thing well. To do a new job, build afresh rather than complicate old programs by adding new “features”.
+1. 让每个程序都做好一件事。要做一项新的工作，构建一个新程序而不是通过添加新的“功能”使旧程序复杂化。
 
-2. Expect the output of every program to become the input to another, as yet unknown, program. Don’t clutter output with extraneous information. Avoid stringently columnar or binary input formats. Don’t insist on interactive input.
+2. 期望每一个程序的输出都可以成为另一个，也许未知，的程序的输入。不要杂乱地输出不相关的信息。避免严格的列式或二进制输入格式。不坚持使用交互式输入。
 
-3. Design and build software, even operating systems, to be tried early, ideally within weeks. Don’t hesitate to throw away the clumsy parts and rebuild them.
+3. 设计和构建软件甚至是操作系统，都要尽早适用，最好是在几周之内就这样做。在扔掉和重建笨拙的组件时不要犹豫。
 
-4. Use tools in preference to unskilled help to lighten a programming task, even if you have to detour to build the tools and expect to throw some of them out after you’ve finished using them.
+4. 优先使用工具而非不熟练的帮助来减轻编程任务，哪怕你必须专门去构建工具，并且在使用完这些工具后会扔掉其中一些。
 
-This approach — automation, rapid prototyping, incremental iteration, being friendly to experimentation, and breaking down large projects into manageable chunks — sounds remarkably like the Agile and DevOps movements of today. Surprisingly little has changed in four decades.
+这种方法——自动化、快速原型化、增量迭代、对实验友好，以及将大型项目分解成可管理的块——听起来非常像今天的敏捷和DevOps运动。令人惊讶的是，这四十年来几乎没有什么变化。
 
-The sort tool is a great example of a program that does one thing well. It is arguably a better sorting implementation than most programming languages have in their standard libraries (which do not spill to disk and do not use multiple threads, even when that would be beneficial). And yet, sort is barely useful in isolation. It only becomes powerful in combination with the other Unix tools, such as uniq.
+`sort`工具是很好的程序只做好一件事的例子。可以说它是一种比大多数编程语言在其标准库中实现的更好的排序实现（它不会溢出到磁盘，也不会使用多个线程，即使这样做是有益的）。然而，单单只用`sort`几乎没什么用。它只有与其他Unix工具，比如`uniq`，结合时才会变得强大。
 
-A Unix shell like bash lets us easily compose these small programs into surprisingly powerful data processing jobs. Even though many of these programs are written by different groups of people, they can be joined together in flexible ways. What does Unix do to enable this composability?
+Unix命令行，比如`bash`，让我们很容易将这些小程序*编写*成令人惊讶的强大的数据处理任务。虽然这些程序中有很多是由不同的人们编写的，但是它们可以灵活地结合在一起。实现这种可组合性Unix都做了些什么？
+
+#### 统一的界面
+
+If you expect the output of one program to become the input to another program, that means those programs must use the same data format — in other words, a compatible interface. If you want to be able to connect any program’s output to any program’s input, that means that all programs must use the same input/ output interface.
+
+In Unix, that interface is a file (or, more precisely, a file descriptor). A file is just an ordered sequence of bytes. Because that is such a simple interface, many different things can be represented using the same interface: an actual file on the filesystem, a communication channel to another process (Unix socket, stdin, stdout), a device driver (say /dev/ audio or /dev/ lp0), a socket representing a TCP connection, and so on. It’s easy to take this for granted, but it’s actually quite remarkable that these very different things can share a uniform interface, so they can easily be plugged together.ii
+
+By convention, many (but not all) Unix programs treat this sequence of bytes as ASCII text. Our log analysis example used this fact: awk, sort, uniq, and head all treat their input file as a list of records separated by the \n (newline, ASCII 0x0A) character. The choice of \n is arbitrary — arguably, the ASCII record separator 0x1E would have been a better choice, since it’s intended for this purpose [14] — but in any case, the fact that all these programs have standardized on using the same record separator allows them to interoperate.
+
+The parsing of each record (i.e., a line of input) is more vague. Unix tools commonly split a line into fields by whitespace or tab characters, but CSV (comma-separated), pipe-separated, and other encodings are also used. Even a fairly simple tool like xargs has half a dozen command-line options for specifying how its input should be parsed.
+
+The uniform interface of ASCII text mostly works, but it’s not exactly beautiful: our log analysis example used {print $ 7} to extract the URL, which is not very readable. In an ideal world this could have perhaps been {print $ request_url} or something of that sort. We will return to this idea later.
+
+Although it’s not perfect, even decades later, the uniform interface of Unix is still something remarkable. Not many pieces of software interoperate and compose as well as Unix tools do: you can’t easily pipe the contents of your email account and your online shopping history through a custom analysis tool into a spreadsheet and post the results to a social network or a wiki. Today it’s an exception, not the norm, to have programs that work together as smoothly as Unix tools do.
+
+Even databases with the same data model often don’t make it easy to get data out of one and into the other. This lack of integration leads to Balkanization of data.
