@@ -152,16 +152,42 @@ Unix命令行，比如`bash`，让我们很容易将这些小程序*编写*成�
 
 #### 统一的界面
 
-If you expect the output of one program to become the input to another program, that means those programs must use the same data format — in other words, a compatible interface. If you want to be able to connect any program’s output to any program’s input, that means that all programs must use the same input/ output interface.
+如果你期望一个程序的输出变成另一个程序的输入，那意味着那些程序必须使用相同的数据格式——换句话说，一个兼容的接口。如果你想将任何程序的输出连接到任何程序的输入，这意味着所有的程序都必须使用相同的输入/输出接口。
 
-In Unix, that interface is a file (or, more precisely, a file descriptor). A file is just an ordered sequence of bytes. Because that is such a simple interface, many different things can be represented using the same interface: an actual file on the filesystem, a communication channel to another process (Unix socket, stdin, stdout), a device driver (say /dev/ audio or /dev/ lp0), a socket representing a TCP connection, and so on. It’s easy to take this for granted, but it’s actually quite remarkable that these very different things can share a uniform interface, so they can easily be plugged together.ii
+在Unix中，这个接口是文件（或者更准确地说，是文件描述符）。文件只是一个有序的字节序列。因为这是一个简单的接口，所以可以使用相同的接口来表示许多不同的东西：文件系统上实际的文件、到另一个进程（Unix套接字、`stdin`、`stdout`）的通信通道、设备驱动程序（例如`/dev/audio`或`/dev/lp0`）、表示TCP连接的套接字，等等。我们很容易认为这是理所当然的，但事实上，这些非常不同的东西可以共享一个统一的接口是非常值得注意的，因此它们可以很容易地连接在一起。
 
-By convention, many (but not all) Unix programs treat this sequence of bytes as ASCII text. Our log analysis example used this fact: awk, sort, uniq, and head all treat their input file as a list of records separated by the \n (newline, ASCII 0x0A) character. The choice of \n is arbitrary — arguably, the ASCII record separator 0x1E would have been a better choice, since it’s intended for this purpose [14] — but in any case, the fact that all these programs have standardized on using the same record separator allows them to interoperate.
+按照惯例，许多（但不是所有）Unix程序将这个字节序列作为ASCII文本来处理。我们的日志分析示例利用了这个特点：`awk`、`sort`、`uniq`和`head`都将它们的输入文件视为由`\n`（新行，ASCII码`0x0A`）字符分隔的记录列表。选择`\n`是任意的——按理说，ASCII记录分隔符`0x1E`本来是更好的选择，因为它就是为此目的而设计的——但无论如何，所有这些程序在使用相同的记录分隔符的这一刻就标准化了，这使得它们可以进行相互操作。
 
-The parsing of each record (i.e., a line of input) is more vague. Unix tools commonly split a line into fields by whitespace or tab characters, but CSV (comma-separated), pipe-separated, and other encodings are also used. Even a fairly simple tool like xargs has half a dozen command-line options for specifying how its input should be parsed.
+对每条记录（即每行输入）的解析比较模糊。Unix工具通常通过空格或制表符将一行拆分为字段，但是也可以用CSV（逗号分隔）、管道分隔和其他编码。即使是像`xargs`这样相当简单的工具，也有六个命令行选项来指定如何解析其输入。
 
-The uniform interface of ASCII text mostly works, but it’s not exactly beautiful: our log analysis example used {print $ 7} to extract the URL, which is not very readable. In an ideal world this could have perhaps been {print $ request_url} or something of that sort. We will return to this idea later.
+统一的ASCII文本接口大部分时间可以工作，但并不是很漂亮：我们的日志分析示例使用`{print $7}`来提取URL，这不是很易读。在一个理想的环境中，这可以是`{print $request_url}`或类似的东西。我们稍后再来谈谈这个想法。
 
-Although it’s not perfect, even decades later, the uniform interface of Unix is still something remarkable. Not many pieces of software interoperate and compose as well as Unix tools do: you can’t easily pipe the contents of your email account and your online shopping history through a custom analysis tool into a spreadsheet and post the results to a social network or a wiki. Today it’s an exception, not the norm, to have programs that work together as smoothly as Unix tools do.
+虽然并不完美，但即使在几十年后，Unix统一接口仍然非常出色。没有多少软件可以像Unix工具一样互相操作和撰写：您无法轻松地通过自定义分析工具将电子邮件帐户的内容和在线购物历史记录输入电子表格，然后把结果发布到社交网络或一个wiki页面上。今天，可以像Unix工具一样顺利地协同工作的程序是一个例外，而不是正常情况。
 
-Even databases with the same data model often don’t make it easy to get data out of one and into the other. This lack of integration leads to Balkanization of data.
+即使是具有*相同数据模型*的数据库，也往往不容易把数据从一个库转移到另一个中。集成的缺乏导致了数据的碎片化。
+
+#### 逻辑与连接的分离
+
+Unix工具的另一个特点是它们使用标准输入（`stdin`）和标准输出（`stdout`）。如果您运行一个程序，而不指定任何其他内容，`stdin`来自键盘而`stdout`将转到屏幕上。但是，您也可以从文件中获取输入和/或将输出重定向到文件。管道允许您将一个进程的stdout附加到另一个进程的stdin(使用一个小内存缓冲区，并且不将整个中间数据流写入磁盘)。
+
+Another characteristic feature of Unix tools is their use of standard input (stdin) and standard output (stdout). If you run a program and don’t specify anything else, stdin comes from the keyboard and stdout goes to the screen. However, you can also take input from a file and/ or redirect output to a file. Pipes let you attach the stdout of one process to the stdin of another process (with a small in-memory buffer, and without writing the entire intermediate data stream to disk).
+
+A program can still read and write files directly if it needs to, but the Unix approach works best if a program doesn’t worry about particular file paths and simply uses stdin and stdout. This allows a shell user to wire up the input and output in whatever way they want; the program doesn’t know or care where the input is coming from and where the output is going to. (One could say this is a form of loose coupling, late binding [15], or inversion of control [16].) Separating the input/ output wiring from the program logic makes it easier to compose small tools into bigger systems.
+
+You can even write your own programs and combine them with the tools provided by the operating system. Your program just needs to read input from stdin and write output to stdout, and it can participate in data processing pipelines. In the log analysis example, you could write a tool that translates user-agent strings into more sensible browser identifiers, or a tool that translates IP addresses into country codes, and simply plug it into the pipeline. The sort program doesn’t care whether it’s communicating with another part of the operating system or with a program written by you.
+
+However, there are limits to what you can do with stdin and stdout. Programs that need multiple inputs or outputs are possible but tricky. You can’t pipe a program’s output into a network connection [17, 18]. iii If a program directly opens files for reading and writing, or starts another program as a subprocess, or opens a network connection, then that I/ O is wired up by the program itself. It can still be configurable (through command-line options, for example), but the flexibility of wiring up inputs and outputs in a shell is reduced.
+
+#### Transparency and experimentation
+
+Part of what makes Unix tools so successful is that they make it quite easy to see what is going on:
+
+* The input files to Unix commands are normally treated as immutable. This means you can run the commands as often as you want, trying various command-line options, without damaging the input files.
+
+* You can end the pipeline at any point, pipe the output into less, and look at it to see if it has the expected form. This ability to inspect is great for debugging.
+
+* You can write the output of one pipeline stage to a file and use that file as input to the next stage. This allows you to restart the later stage without rerunning the entire pipeline.
+
+Thus, even though Unix tools are quite blunt, simple tools compared to a query optimizer of a relational database, they remain amazingly useful, especially for experimentation.
+
+However, the biggest limitation of Unix tools is that they run only on a single machine — and that’s where tools like Hadoop come in.
