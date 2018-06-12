@@ -254,9 +254,9 @@ MapReduce与Unix命令管道的主要区别在于它可以在许多机器上并�
 
 每当映射函数完成对其输入文件的读取并写入已排序的输出文件时，MapReduce调度程序会通知归纳函数，它们可以开始从归纳函数获取输出文件。归纳函数连接到每个映射函数，并从它们的分区下载排好序的键值对文件。这个通过归纳函数分区、排序，然后从映射函数拷贝数据分区到归纳函数的过程被称为混洗（这是一个让人困惑的词——与洗牌不同，MapReduce中没有随机性）。
 
-归纳函数从映射函数中获取文件，并将它们合并在一起，保持排序顺序。因此，如果不同的映射函数使用相同的键生成记录，那么它们将在合并后的归纳函数输入中相邻。归纳函数是用一个键和一个迭代器调用的，迭代器用相同的键递增地扫描所有记录（在某些情况下，内存是无法放下所有的记录的)。
+归纳函数从映射函数中获取文件，并将它们合并在一起，保持排序顺序。因此，如果不同的映射函数使用相同的键生成记录，那么它们将在合并后的归纳函数输入中相邻。归纳函数是用一个键和一个迭代器调用的，迭代器用相同的键递增地扫描所有记录（在某些情况下，内存是无法放下所有的记录的）。
 
-归纳函数可以使用任意逻辑来处理这些记录，并且可以生成任意数量的输出记录。这些输出记录被写入分布式文件系统上的文件(通常，在运行归纳函数的设备本地磁盘上有一个副本，在其他机器上有其它副本)。
+归纳函数可以使用任意逻辑来处理这些记录，并且可以生成任意数量的输出记录。这些输出记录被写入分布式文件系统上的文件（通常，在运行归纳函数的设备本地磁盘上有一个副本，在其他机器上有其它副本）。
 
 #### MapReduce工作流
 
@@ -272,37 +272,39 @@ MapReduce与Unix命令管道的主要区别在于它可以在许多机器上并�
 
 Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，也设置了包含多个可以自动连在一起的MapReduce阶段的工作流。
 
-### Reduce-Side Joins and Grouping
+### 归纳侧的连接与分组
 
-We discussed joins in Chapter   2 in the context of data models and query languages, but we have not delved into how joins are actually implemented. It is time that we pick up that thread again.
+我们在第2章中研究数据模型和查询语言时讨论了连接，但我们还没有深入研究连接是如何实现的。现在是我们重新开始讨论它的时候了。
 
-In many datasets it is common for one record to have an association with another record: a foreign key in a relational model, a document reference in a document model, or an edge in a graph model. A join is necessary whenever you have some code that needs to access records on both sides of that association (both the record that holds the reference and the record being referenced). As discussed in Chapter   2, denormalization can reduce the need for joins but generally not remove it entirely.v
+在许多数据集中，一条记录与另一条记录有关联是很常见的：关系模型中的*外键*，文档模型中的*文档引用*，亦或是图形模型中的*边*。每当一些代码需要访问关联两边的记录（包含引用的记录与被引用的记录）时，连接都是必需的。正如在第2章中所讨论的，去正规化可以减少对连接的需求，但通常无法完全不依赖它。
 
-In a database, if you execute a query that involves only a small number of records, the database will typically use an index to quickly locate the records of interest (see Chapter   3). If the query involves joins, it may require multiple index lookups. However, MapReduce has no concept of indexes — at least not in the usual sense.
+在数据库中，如果执行的查询只涉及到少量的记录，数据库通常会使用索引快速定位感兴趣的记录（见第3章）。如果查询涉及连接，就会需要多个索引查找。然而，MapReduce没有索引的概念——至少通常意义上并非如此。
 
-When a MapReduce job is given a set of files as input, it reads the entire content of all of those files; a database would call this operation a full table scan. If you only want to read a small number of records, a full table scan is outrageously expensive compared to an index lookup. However, in analytic queries (see “Transaction Processing or Analytics?”) it is common to want to calculate aggregates over a large number of records. In this case, scanning the entire input might be quite a reasonable thing to do, especially if you can parallelize the processing across multiple machines.
+当给予MapReduce任务一组文件作为输入时，它会读取所有这些文件的全部内容；数据库将此操作称为*全表扫描*。如果您只想读取少量的记录，那么相比于索引查找，全表扫描代价要高得多。然而在分析性查询中（见“事务处理还是分析？”一节），想要计算大量记录的聚合是很常见的。在这种情况下，扫描整个输入可能是相当合理的事情，尤其是如果可以在多台机器上并行处理的话。
 
-When we talk about joins in the context of batch processing, we mean resolving all occurrences of some association within a dataset. For example, we assume that a job is processing the data for all users simultaneously, not merely looking up the data for one particular user (which would be done far more efficiently with an index).
+当我们在批处理主题中讨论连接时，我们是指解决数据集中所有的某种关联。例如，我们假设一项任务同时为所有用户处理数据，而不仅仅是查找某个特定用户的数据（使用索引可以更有效地完成这一任务）。
 
-#### Example: analysis of user activity events
+#### 案例：用户活动事件的分析
 
-A typical example of a join in a batch job is illustrated in Figure   10-2. On the left is a log of events describing the things that logged-in users did on a website (known as activity events or clickstream data), and on the right is a database of users. You can think of this example as being part of a star schema (see “Stars and Snowflakes: Schemas for Analytics”): the log of events is the fact table, and the user database is one of the dimensions.
+批处理任务中连接的典型案例如图10-2所示。左边是描述已登录的用户在网站上的操作事件日志（称为*活动事件*或*点击流数据*），右边是用户数据库。您可以把这个案例视为星型模式的一部分（见“星型与雪花型：用于分析的模式”一节）：事件日志是事实表，而用户数据库是维度之一。
 
-*Figure 10-2. A join between a log of user activity events and a database of user profiles.*
+*图10-2 在用户活动事件的日志与用户资料的数据库之间的连接。*
 
-An analytics task may need to correlate user activity with user profile information: for example, if the profile contains the user’s age or date of birth, the system could determine which pages are most popular with which age groups. However, the activity events contain only the user ID, not the full user profile information. Embedding that profile information in every single activity event would most likely be too wasteful. Therefore, the activity events need to be joined with the user profile database.
+分析任务会需要把用户活动与用户资料信息相关联：例如，如果资料包含用户的年龄或出生日期，系统可以判断哪些页面在哪个年龄组最流行。然而，活动事件只包含用户ID，而不是完整的用户资料信息。在每个活动事件中都嵌入用户资料信息太浪费了。因此，活动事件需要与用户资料数据库连接。
 
-The simplest implementation of this join would go over the activity events one by one and query the user database (on a remote server) for every user ID it encounters. This is possible, but it would most likely suffer from very poor performance: the processing throughput would be limited by the round-trip time to the database server, the effectiveness of a local cache would depend very much on the distribution of data, and running a large number of queries in parallel could easily overwhelm the database [35].
+这个连接最简单实现是挨个检查活动事件，然后（在远程服务器上）查询用户数据库中遇到的每个用户ID。这是可能的，但是性能可能会非常差：处理的吞吐量受到访问数据库服务器往返时间的限制，本地缓存的有效性很大程度上取决于数据的分布，而并行执行大量的查询很容易使数据库拥堵。
 
-In order to achieve good throughput in a batch process, the computation must be (as much as possible) local to one machine. Making random-access requests over the network for every record you want to process is too slow. Moreover, querying a remote database would mean that the batch job becomes nondeterministic, because the data in the remote database might change.
+为了在批处理过程中获得良好的吞吐量，计算必须（尽可能多地）发生在本地单台设备上。通过网络对您想要处理的每一条记录进行随机访问请求太慢了。此外，查询远程数据库意味着批处理作业变得不确定起来，因为远程数据库中的数据可能会发生变化。
 
-Thus, a better approach would be to take a copy of the user database (for example, extracted from a database backup using an ETL process — see “Data Warehousing”) and to put it in the same distributed filesystem as the log of user activity events. You would then have the user database in one set of files in HDFS and the user activity records in another set of files, and could use MapReduce to bring together all of the relevant records in the same place and process them efficiently.
+因此，更好的方法是获取用户数据库的副本（比如使用ETL进程从数据库备份中提取——见“数据仓库”一节），并把它放在用户活动事件日志所在的同一个分布式文件系统中。这样，用户数据库放在HDFS中的一组文件中而用户活动记录放在另一组文件中，于是可以使用MapReduce将所有相关记录集中在同一个地方，从而有效地处理它们。
 
-#### Sort-merge joins
+#### 排序-合并连接
 
-Recall that the purpose of the mapper is to extract a key and value from each input record. In the case of Figure   10-2, this key would be the user ID: one set of mappers would go over the activity events (extracting the user ID as the key and the activity event as the value), while another set of mappers would go over the user database (extracting the user ID as the key and the user’s date of birth as the value). This process is illustrated in Figure   10-3.
+回想一下，映射函数的目的是从每个输入记录中提取一个键和值。在图10-2的情况中，这个键是用户ID：一组映射函数将遍历活动事件（提取用户ID作为键而活动事件作为值），而另一组映射函数将遍历用户数据库（提取用户ID作为键而用户的出生日期作为值）。这个过程如图10-3所示.
 
-*Figure 10-3. A reduce-side sort-merge join on user ID. If the input datasets are partitioned into multiple files, each could be processed with multiple mappers in parallel.*
+*图10-3 归纳侧在用户ID上排序合并连接。如果输入数据集被分成数个文件，每一个文件可以用多个映射函数并行处理。*
+
+
 
 When the MapReduce framework partitions the mapper output by key and then sorts the key-value pairs, the effect is that all the activity events and the user record with the same user ID become adjacent to each other in the reducer input. The MapReduce job can even arrange the records to be sorted such that the reducer always sees the record from the user database first, followed by the activity events in timestamp order — this technique is known as a secondary sort [26].
 
