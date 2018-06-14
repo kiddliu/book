@@ -298,31 +298,31 @@ Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，�
 
 因此，更好的方法是获取用户数据库的副本（比如使用ETL进程从数据库备份中提取——见“数据仓库”一节），并把它放在用户活动事件日志所在的同一个分布式文件系统中。这样，用户数据库放在HDFS中的一组文件中而用户活动记录放在另一组文件中，于是可以使用MapReduce将所有相关记录集中在同一个地方，从而有效地处理它们。
 
-#### 排序-合并连接
+#### 归并连接
 
 回想一下，映射函数的目的是从每个输入记录中提取一个键和值。在图10-2的情况中，这个键是用户ID：一组映射函数将遍历活动事件（提取用户ID作为键而活动事件作为值），而另一组映射函数将遍历用户数据库（提取用户ID作为键而用户的出生日期作为值）。这个过程如图10-3所示.
 
 *图10-3 归纳侧在用户ID上排序合并连接。如果输入数据集被分成数个文件，每一个文件可以用多个映射函数并行处理。*
 
+当MapReduce框架把映射函数的输出按键分区，然后对键值对进行排序时，结果是所有活动事件和具有相同用户ID的用户记录在归纳函数的输入中彼此相邻。MapReduce任务甚至可以为记录排序，使得归纳函数总是先看到用户数据库的记录，然后才是按时间戳顺序排列的活动事件——这种技术被称为次级排序。
 
+之后，归纳函数可以很容易地执行实际的连接逻辑：对每个用户ID都调用一次归纳函数，因为有了次级排序，第一个值应该是来自用户数据库的出生日期记录。归纳函数将出生日期存储在一个局部变量中，然后使用相同的用户ID迭代活动事件记录，输出一对浏览的URL与用户年龄。随后的MapReduce任务可以计算每个URL的用户年龄分布，并按年龄进行分组聚合计算。
 
-When the MapReduce framework partitions the mapper output by key and then sorts the key-value pairs, the effect is that all the activity events and the user record with the same user ID become adjacent to each other in the reducer input. The MapReduce job can even arrange the records to be sorted such that the reducer always sees the record from the user database first, followed by the activity events in timestamp order — this technique is known as a secondary sort [26].
+由于归纳函数一次处理了特定用户ID的所有记录，因此在任何时候它都只需要在内存中保存一个用户记录，而且不需要通过网络发出任何请求。这个算法被称为*归并连接*，因为映射函数的输出是按键排序的，然后归纳函数将连接两边排好序的记录列表合并在一起。
 
-The reducer can then perform the actual join logic easily: the reducer function is called once for every user ID, and thanks to the secondary sort, the first value is expected to be the date-of-birth record from the user database. The reducer stores the date of birth in a local variable and then iterates over the activity events with the same user ID, outputting pairs of viewed-url and viewer-age-in-years. Subsequent MapReduce jobs could then calculate the distribution of viewer ages for each URL, and cluster by age group.
+#### 把相关数据放在一起
 
-Since the reducer processes all of the records for a particular user ID in one go, it only needs to keep one user record in memory at any one time, and it never needs to make any requests over the network. This algorithm is known as a sort-merge join, since mapper output is sorted by key, and the reducers then merge together the sorted lists of records from both sides of the join.
+在归并连接中，映射函数和排序过程保证把执行特定用户ID连接操作所需的所有数据集中在同一个位置：这样只需要调用一次归纳函数。事先排列好所有需要的数据之后，归纳函数可以是一段相当简单的单线程代码，以很高的吞吐量和很低的内存开销遍历这些记录。
 
-#### Bringing related data together in the same place
+看待这个体系架构的一种方式是映射函数“发送消息”给归纳函数。当映射函数发送一个键值对时，键的作用类似于值被发送到的目标地址。尽管键只是一个任意字符串（而不是有着IP地址和端口号那样的真实网络地址），但它表现地像一个地址：所有具有相同键的键值对都将被发送到相同的目的地（对归纳函数的调用）。
 
-In a sort-merge join, the mappers and the sorting process make sure that all the necessary data to perform the join operation for a particular user ID is brought together in the same place: a single call to the reducer. Having lined up all the required data in advance, the reducer can be a fairly simple, single-threaded piece of code that can churn through records with high throughput and low memory overhead.
-
-One way of looking at this architecture is that mappers “send messages” to the reducers. When a mapper emits a key-value pair, the key acts like the destination address to which the value should be delivered. Even though the key is just an arbitrary string (not an actual network address like an IP address and port number), it behaves like an address: all key-value pairs with the same key will be delivered to the same destination (a call to the reducer).
-
-Using the MapReduce programming model has separated the physical network communication aspects of the computation (getting the data to the right machine) from the application logic (processing the data once you have it). This separation contrasts with the typical use of databases, where a request to fetch data from a database often occurs somewhere deep inside a piece of application code [36]. Since MapReduce handles all network communication, it also shields the application code from having to worry about partial failures, such as the crash of another node: MapReduce transparently retries failed tasks without affecting the application logic.
+使用MapReduce编程模型把真实世界中网络通信方面的计算（把数据发送到正确的设备）从应用程序逻辑（一旦获取数据就处理它）分离出来。这种分离与数据库的典型使用形成鲜明对比：从数据库获取数据的请求经常发生在应用程序代码的深处。由于MapReduce处理所有网络通信，这使得应用程序代码不用担心部分失效问题，比如其它节点的崩溃：MapReduce自动重试失败的任务而不影响应用程序逻辑。
 
 #### GROUP BY
 
-Besides joins, another common use of the “bringing related data to the same place” pattern is grouping records by some key (as in the GROUP BY clause in SQL). All records with the same key form a group, and the next step is often to perform some kind of aggregation within each group — for example:
+除了连接以外，“把相关数据放在一起”模式的另一种常见用法是按某个键（如SQL中的`GROUP BY`子句)对记录进行分组。所有具有相同键的记录构成一个组，下一步通常是在每个组内执行某种聚合操作——比如：
+
+* 对每组中记录的数目计数（就像我们的页面浏览示例中，您可以将其表示为SQL中的计数(*)聚合)
 
 * Counting the number of records in each group (like in our example of counting page views, which you would express as a COUNT(*) aggregation in SQL)
 
