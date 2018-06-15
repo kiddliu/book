@@ -320,17 +320,17 @@ Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，�
 
 #### GROUP BY
 
-除了连接以外，“把相关数据放在一起”模式的另一种常见用法是按某个键（如SQL中的`GROUP BY`子句)对记录进行分组。所有具有相同键的记录构成一个组，下一步通常是在每个组内执行某种聚合操作——比如：
+除了连接以外，“把相关数据放在一起”模式的另一种常见用法是按某个键（如SQL中的`GROUP BY`子句）对记录进行分组。所有具有相同键的记录构成一个组，下一步通常是在每个组内执行某种聚合操作——比如：
 
-* 对每组中记录的数目计数（就像我们的页面浏览示例中，您可以将其表示为SQL中的计数(*)聚合)
+* 对每组中记录的数目计数（就像我们统计页面浏览量示例中，你可以用SQL中的`COUNT(*)`表示它）
 
-* Counting the number of records in each group (like in our example of counting page views, which you would express as a COUNT(*) aggregation in SQL)
+* 用SQL把某个特定字段的值都加起来（`SUM(fieldname)`）
 
-* Adding up the values in one particular field (SUM( fieldname)) in SQL
+* 根据某个排序函数选出前*k*个记录
 
-* Picking the top k records according to some ranking function
+用MapReduce实现这种分组操作最简单方法是设置映射函数，从而生成的键值对使用期望的分组键。之后，分区与排序过程把有着相同键的所有记录放在同一个归纳函数中。因此，在MapReduce之上实现分组和连接看起来非常相似。
 
-The simplest way of implementing such a grouping operation with MapReduce is to set up the mappers so that the key-value pairs they produce use the desired grouping key. The partitioning and sorting process then brings together all the records with the same key in the same reducer. Thus, grouping and joining look quite similar when implemented on top of MapReduce.
+
 
 Another common use for grouping is collating all the activity events for a particular user session, in order to find out the sequence of actions that the user took — a process called sessionization [37]. For example, such analysis could be used to work out whether users who were shown a new version of your website are more likely to make a purchase than those who were shown the old version (A/ B testing), or to calculate whether some marketing activity is worthwhile.
 
