@@ -180,11 +180,11 @@ Unix工具的另一个特点是它们使用标准输入（`stdin`）和标准输
 
 使Unix工具如此成功的部分原因在于它们让你很容易了解到正在发生的事情：
 
-* Unix命令的输入文件通常被视为不可变的。这意味着您可以根据需要运行命令，尝试各种命令行选项，而不会损坏输入文件。
+* Unix命令的输入文件通常被视为不可变的。这意味着你可以根据需要运行命令，尝试各种命令行选项，而不会损坏输入文件。
 
-* 您可以在任何时候结束管道，将输出输送到`less`，然后查看它是否具有预期的形式。这种检查能力对调试是很好的。
+* 你可以在任何时候结束管道，将输出输送到`less`，然后查看它是否具有预期的形式。这种检查能力对调试是很好的。
 
-* 您可以将管道某一阶段的输出写入到文件，然后把这个文件用作下一个阶段的输入。这使得您可以重新启动后期阶段，而无需重新运行整个管道。
+* 你可以将管道某一阶段的输出写入到文件，然后把这个文件用作下一个阶段的输入。这使得你可以重新启动后期阶段，而无需重新运行整个管道。
 
 因此尽管相比于关系数据库的查询优化器，Unix工具是相当简单的工具，但是它们仍然非常有用，特别是在尝试阶段。
 
@@ -210,7 +210,7 @@ HDFS扩展性很好：在撰写这本书时，最大的HDFS部署运行在数万
 
 ### MapReduce任务的执行
 
-MapReduce是一个编程框架，有了它您可以编写代码来处理在类似HDFS这样的分布式文件系统中的大型数据集。理解它的最简单方法是参考“简单日志分析”一节中的Web服务器日志分析案例。MapReduce中的数据处理模式非常类似于这个示例：
+MapReduce是一个编程框架，有了它你可以编写代码来处理在类似HDFS这样的分布式文件系统中的大型数据集。理解它的最简单方法是参考“简单日志分析”一节中的Web服务器日志分析案例。MapReduce中的数据处理模式非常类似于这个示例：
 
 1. 读取一组输入文件，并将其分解为记录。在Web服务器日志示例中，每条记录都是日志中的一行（也就是说，`\n`是记录分隔符）。
 
@@ -220,9 +220,9 @@ MapReduce是一个编程框架，有了它您可以编写代码来处理在类�
 
 4. 调用归纳函数来迭代排了序的键值对。如果同一键多次出现，排序让它们在列表中相邻，因此很容易组合这些值而不必将大量状态保存在内存中。在前面的示例中，归纳函数由命令`uniq -c`实现，该命令使用相同的键计算相邻记录的数量。
 
-这四个步骤可以由一个MapReduce任务执行。步骤2（映射）和步骤4（归纳）是编写自定义数据处理代码的地方。步骤1（将文件分解为记录）由输入格式解析器处理。步骤3排序步骤，在MapReduce中是隐式的——您不用写它，因为映射函数的输出总是排序之后再交给归纳函数。
+这四个步骤可以由一个MapReduce任务执行。步骤2（映射）和步骤4（归纳）是编写自定义数据处理代码的地方。步骤1（将文件分解为记录）由输入格式解析器处理。步骤3排序步骤，在MapReduce中是隐式的——你不用写它，因为映射函数的输出总是排序之后再交给归纳函数。
 
-要创建MapReduce任务，您需要实现两个回调函数，即映射函数和归纳函数，它们的行为如下（也参考“MapReduce查询”一节）：
+要创建MapReduce任务，你需要实现两个回调函数，即映射函数和归纳函数，它们的行为如下（也参考“MapReduce查询”一节）：
 
 映射函数
 
@@ -280,13 +280,13 @@ Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，�
 
 在数据库中，如果执行的查询只涉及到少量的记录，数据库通常会使用索引快速定位感兴趣的记录（见第3章）。如果查询涉及连接，就会需要多个索引查找。然而，MapReduce没有索引的概念——至少通常意义上并非如此。
 
-当给予MapReduce任务一组文件作为输入时，它会读取所有这些文件的全部内容；数据库将此操作称为*全表扫描*。如果您只想读取少量的记录，那么相比于索引查找，全表扫描代价要高得多。然而在分析性查询中（见“事务处理还是分析？”一节），想要计算大量记录的聚合是很常见的。在这种情况下，扫描整个输入可能是相当合理的事情，尤其是如果可以在多台机器上并行处理的话。
+当给予MapReduce任务一组文件作为输入时，它会读取所有这些文件的全部内容；数据库将此操作称为*全表扫描*。如果你只想读取少量的记录，那么相比于索引查找，全表扫描代价要高得多。然而在分析性查询中（见“事务处理还是分析？”一节），想要计算大量记录的聚合是很常见的。在这种情况下，扫描整个输入可能是相当合理的事情，尤其是如果可以在多台机器上并行处理的话。
 
 当我们在批处理主题中讨论连接时，我们是指解决数据集中所有的某种关联。例如，我们假设一项任务同时为所有用户处理数据，而不仅仅是查找某个特定用户的数据（使用索引可以更有效地完成这一任务）。
 
 #### 案例：用户活动事件的分析
 
-批处理任务中连接的典型案例如图10-2所示。左边是描述已登录的用户在网站上的操作事件日志（称为*活动事件*或*点击流数据*），右边是用户数据库。您可以把这个案例视为星型模式的一部分（见“星型与雪花型：用于分析的模式”一节）：事件日志是事实表，而用户数据库是维度之一。
+批处理任务中连接的典型案例如图10-2所示。左边是描述已登录的用户在网站上的操作事件日志（称为*活动事件*或*点击流数据*），右边是用户数据库。你可以把这个案例视为星型模式的一部分（见“星型与雪花型：用于分析的模式”一节）：事件日志是事实表，而用户数据库是维度之一。
 
 *图10-2 在用户活动事件的日志与用户资料的数据库之间的连接。*
 
@@ -294,7 +294,7 @@ Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，�
 
 这个连接最简单实现是挨个检查活动事件，然后（在远程服务器上）查询用户数据库中遇到的每个用户ID。这是可能的，但是性能可能会非常差：处理的吞吐量受到访问数据库服务器往返时间的限制，本地缓存的有效性很大程度上取决于数据的分布，而并行执行大量的查询很容易使数据库拥堵。
 
-为了在批处理过程中获得良好的吞吐量，计算必须（尽可能多地）发生在本地单台设备上。通过网络对您想要处理的每一条记录进行随机访问请求太慢了。此外，查询远程数据库意味着批处理作业变得不确定起来，因为远程数据库中的数据可能会发生变化。
+为了在批处理过程中获得良好的吞吐量，计算必须（尽可能多地）发生在本地单台设备上。通过网络对你想要处理的每一条记录进行随机访问请求太慢了。此外，查询远程数据库意味着批处理作业变得不确定起来，因为远程数据库中的数据可能会发生变化。
 
 因此，更好的方法是获取用户数据库的副本（比如使用ETL进程从数据库备份中提取——见“数据仓库”一节），并把它放在用户活动事件日志所在的同一个分布式文件系统中。这样，用户数据库放在HDFS中的一组文件中而用户活动记录放在另一组文件中，于是可以使用MapReduce将所有相关记录集中在同一个地方，从而有效地处理它们。
 
@@ -330,22 +330,64 @@ Hadoop的各种高级工具，如Pig、Hive、Cascading、Crunch和FlumeJava，�
 
 用MapReduce实现这种分组操作最简单方法是设置映射函数，从而生成的键值对使用期望的分组键。之后，分区与排序过程把有着相同键的所有记录放在同一个归纳函数中。因此，在MapReduce之上实现分组和连接看起来非常相似。
 
+分组的另一种常见用途是整理特定用户会话的所有活动事件，方便找出用户采取的动作序列——这叫做*会话化*过程。例如，这样的分析可以用来计算那些浏览你的网站新版本的用户是否比那些浏览旧版本（A/B测试）的用户更愿意消费，或是计算一些营销活动是否物有所值。
 
+如果有多个Web服务器处理用户请求，那么特定用户的活动事件很可能分散在不同服务器的日志文件中。你可以使用会话cookie、用户ID或类似的标识符作为分组键来实现会话化，并且把特定用户的所有活动事件集中在一个地方，同时把不同用户的事件分布在不同的分区中。
 
-Another common use for grouping is collating all the activity events for a particular user session, in order to find out the sequence of actions that the user took — a process called sessionization [37]. For example, such analysis could be used to work out whether users who were shown a new version of your website are more likely to make a purchase than those who were shown the old version (A/ B testing), or to calculate whether some marketing activity is worthwhile.
+#### 处理倾斜
 
-If you have multiple web servers handling user requests, the activity events for a particular user are most likely scattered across various different servers’ log files. You can implement sessionization by using a session cookie, user ID, or similar identifier as the grouping key and bringing all the activity events for a particular user together in one place, while distributing different users’ events across different partitions.
+如果有大量数据与单个键有关，“把所有具有相同键的记录放在一起”的模式就会出问题。举个例子，在社交网络中，大多数用户只会与几百人有联系，但少数名人会拥有数百万粉丝。这种不成比例的活动数据库记录被称为*关键对象*或*热键*。
 
-#### Handling skew
+在单个归纳函数种收集与一个名人相关的所有活动（例如，对他们发表内容的回复）会导致明显的倾斜（也被称为*热点*）——也就是说，某个归纳函数必须比其他归纳函数处理了更多的记录（参见“倾斜的工作负载和缓解热点”）。因为MapReduce任务只有在所有的映射函数和归纳函数完成后才算完成，任何后续任务都必须等待最慢的归纳函数完成之后才可以进行。
 
-The pattern of “bringing all records with the same key to the same place” breaks down if there is a very large amount of data related to a single key. For example, in a social network, most users might be connected to a few hundred people, but a small number of celebrities may have many millions of followers. Such disproportionately active database records are known as linchpin objects [38] or hot keys.
+如果连接的输入有热键，现在有了一些算法可以用来进行补偿。举个例子，Pig中的偏斜联接方法首先执行一个抽样任务从而判断哪些键是热键。在执行实际连接时，映射函数把与热键有关的任何记录发送给任意选择的几个归纳函数中的一个（与传统的MapReduce不同，后者基于键的散列值确定地选择归纳函数）。对于连接的其他输入，与热键相关的记录需要被复制到所有处理那个键的归纳函数中。
 
-Collecting all activity related to a celebrity (e.g., replies to something they posted) in a single reducer can lead to significant skew (also known as hot spots) — that is, one reducer that must process significantly more records than the others (see “Skewed Workloads and Relieving Hot Spots”). Since a MapReduce job is only complete when all of its mappers and reducers have completed, any subsequent jobs must wait for the slowest reducer to complete before they can start.
+这种技术把处理热键的工作分散到多个归纳函数上，使得可以更好地并行化处理，而代价是不得不把其它的连接输入复制到多个归纳函数。Crunch中的分片连接方法也很类似，但需要显式地指定热键而不是使用抽样作业。这种技术也与我们在“倾斜工作负载和缓解热点”中讨论的技术非常类似，它使用了随机化来缓解分区数据库中的热点。
 
-If a join input has hot keys, there are a few algorithms you can use to compensate. For example, the skewed join method in Pig first runs a sampling job to determine which keys are hot [39]. When performing the actual join, the mappers send any records relating to a hot key to one of several reducers, chosen at random (in contrast to conventional MapReduce, which chooses a reducer deterministically based on a hash of the key). For the other input to the join, records relating to the hot key need to be replicated to all reducers handling that key [40].
+Hive的倾斜连接优化采用了另一种方法。它要求在表的元数据中显式指定热键，之后它会把与这些键相关的记录存储在单独的文件中，与其它记录隔离开。在该表上执行连接时，它对热键使用映射侧连接（见下一节）。
 
-This technique spreads the work of handling the hot key over several reducers, which allows it to be parallelized better, at the cost of having to replicate the other join input to multiple reducers. The sharded join method in Crunch is similar, but requires the hot keys to be specified explicitly rather than using a sampling job. This technique is also very similar to one we discussed in “Skewed Workloads and Relieving Hot Spots”, using randomization to alleviate hot spots in a partitioned database.
+当用热键分组记录并对它们执行聚合操作时，可以用两个阶段执行分组。第一个MapReduce阶段把记录发送到一个随机归纳函数，从而每个归纳函数只在一部分热键记录上执行分组，输出更紧凑的聚合值。然后，第二个MapReduce任务把所有第一阶段归纳函数的值组合成每个键的单个值。
 
-Hive’s skewed join optimization takes an alternative approach. It requires hot keys to be specified explicitly in the table metadata, and it stores records related to those keys in separate files from the rest. When performing a join on that table, it uses a map-side join (see the next section) for the hot keys.
+### 映射侧连接
 
-When grouping records by a hot key and aggregating them, you can perform the grouping in two stages. The first MapReduce stage sends records to a random reducer, so that each reducer performs the grouping on a subset of records for the hot key and outputs a more compact aggregated value per key. The second MapReduce job then combines the values from all of the first-stage reducers into a single value per key.
+上一节中描述的连接算法在归纳函数中执行实际的连接逻辑，因此被称为归纳侧连接。映射函数负责准备输入数据：从每条输入记录中提取键和值，把键值对分配给归纳函数分区，然后按键进行排序。
+
+归纳侧方式的好处在于你不用对输入数据进行任何假设：无论它的属性和结构如何，映射函数都能为连接做好准备。然而，缺点是所有这些排序、复制到归纳函数然后合并归纳函数的输入，代价都是非常高的。根据可用的内存缓冲区大小，数据在通过MapReduce的各个阶段时有可能会多次写入磁盘。
+
+另一方面，如果你可以对输入数据做出某些假设，使用所谓的映射侧连接可以使连接速度更快。这种方法使用了一个缩减了的MapReduce任务，其中没有归纳函数也没有排序。取而代之的是每个映射器只从分布式文件系统读取一个输入文件块，并只写入一个输出文件到文件系统——仅此而已。
+
+#### 广播哈希连接
+
+执行映射侧连接最简单的方式是在一个大数据集连接一个小数据集的时候。特别是，小数据集需要足够小，从而每个映射函数都可以把它整体加载到内存中。
+
+例如在图10-2中，假设用户数据库足够小到可以放在内存中。在这种情况下，当映射函数启动时，它首先可以把用户数据库从分布式文件系统读入内存中的哈希表。一旦完成，映射函数就可以扫描用户活动事件，查找哈希表中每个时间的用户ID。
+
+这里还有几个映射任务：一个是用于连接的每个大型输入的文件块（在图10-2的例子中，活动事件是大型输入）。每个映射函数都把小型输入完全加载到内存中。
+
+这个简单但有效的算法称为广播哈希连接：广播这个词反映了这样一个事实：用于大型输入分区的每个映射函数都读取小型输入的全部内容（因此，小型输入有效地“广播”到了大型输入的所有分区），而散列这个词反映了它对哈希表的使用。这种连接方法由Pig（名为“复制连接”）、Hive（“MapJoin”）、Cascading和Crunch支持。它还用于数据仓库查询引擎，比如Impala。
+
+与把小型连接输入加载到内存中的哈希表不同，另一种方法是把小型连接输入储存在本地磁盘上的只读索引中。索引中经常使用的部分会保留在操作系统的页面缓存中，因此这种方法可以提供几乎与内存哈希表一样快的随机访问查找，而实际上不需要把数据集放入内存。
+
+#### 分区哈希连接
+
+如果映射侧连接的输入也以相同的方式进行分区，那么哈希连接方法可以独立地应用于每个分区。在图10-2的场景中，你可以根据用户ID的最后一个十进制数字对活动事件和用户数据库进行分区（因此，任意一边都有10个分区）。例如，映射函数3首先把ID以3结尾的所有用户加载到哈希表中，然后扫描每个ID以3结尾的用户的所有活动事件。
+
+如果分区操作正确，可以确保所有你希望连接的记录都位于同一个编号分区中，因此每个映射函数只从每个输入数据集中读取一个分区就足够了。这样做的优点是每个映射函数可以把较少的数据加载到它的哈希表中。
+
+这种方法只有在两个连接输入都有相同数量的分区时才可以工作，并根据相同的键和相同的哈希函数把记录分配给分区。如果输入是由已经执行此分组的现有MapReduce任务生成的，那么这是一个合理的假设。
+
+在Hive中，分区哈希连接称为分桶映射连接。
+
+#### 映射侧合并连接
+
+如果输入数据集不仅以相同的方式进行分区，而且根据相同的键进行排序，那么映射侧连接的另一个变体也适用。在这种情况下，输入是否足够小到可以放在内存里并不重要，因为映射函数可以执行通常由归纳函数执行的合并操作：递增地读取两个输入文件，按升键顺序，然后使用相同的键匹配记录。
+
+如果映射侧合并连接是可能的，这可能意味着先前的MapReduce任务首先将输入数据集引入到这个分了区且排了序的表单中。原则上，这个连接可以在先前任务的归纳阶段执行。但是，在一个单独的、只有映射的任务中执行合并联接仍然是合适的，比如分了区且排了序的数据集除了这个特定的连接之外，还用于其他目的。
+
+#### 有映射侧连接的MapReduce工作流
+
+当MapReduce连接的输出被下游任务消耗时，映射侧或归纳侧连接的选择会影响输出的结构。归纳侧连接的输出通过连接键进行分区和排序，而映射端连接的输出以与大型输入相同的方式进行分区和排序（因为对于连接的大型输入的每个文件块都启动了一个映射任务，而不管是不是使用了分区连接还是广播连接）。
+
+正如前面所讨论的，映射侧连接还对输入数据集的大小、排序和分区做出了更多假设。在优化连接策略时，了解分布式文件系统中数据集的物理布局变得很重要：仅仅知道存储数据目录的编码格式以及名称是不够的；你还必须知道分区的数量以及数据被分区和排序的键。
+
+在Hadoop生态系统中，这类关于数据集划分的元数据通常保存在HCatalog和Hive元存储中。
