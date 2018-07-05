@@ -416,7 +416,7 @@ FROM fact_sales
     JOIN dim_product ON fact_sales.product_sk = dim_product.product_sk
 WHERE
     dim_date.year = 2013 AND
-    dim_product.category IN (' Fresh fruit', 'Candy')
+    dim_product.category IN ('Fresh fruit', 'Candy')
 GROUP BY 
     dim_date.weekday, dim_product.category;
 ```
