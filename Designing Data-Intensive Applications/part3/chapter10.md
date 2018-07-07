@@ -526,7 +526,7 @@ MapReduce方法更适合于大型任务：处理这么多数据且运行时间�
 
 如前所述，每个MapReduce作业都独立于其他每个作业。作业与其它事物的主要接触点是其在分布式文件系统上的输入和输出目录。如果你希望一个作业的输出成为第二个作业的输入，就需要把第二个作业的输入目录配置为与第一个作业的输出目录相同，并且外部工作流调度程序必须在第一个作业完成之后才启动第二个作业。
 
-如果第一个作业的输出是希望在组织中广泛发布的数据集，那么这个设置是合理的。在这种情况下，您需要能够按名称引用它，并把它作为几个不同作业（包括其他团队开发的作业）的输入重用。把数据发布到分布式文件系统中的众所周知的位置使得作业之间松散耦合，这样作业就不需要知道谁在产生输入谁在使用输出（见“逻辑与连接的分离”）。
+如果第一个作业的输出是希望在组织中广泛发布的数据集，那么这个设置是合理的。在这种情况下，你需要能够按名称引用它，并把它作为几个不同作业（包括其他团队开发的作业）的输入重用。把数据发布到分布式文件系统中的众所周知的位置使得作业之间松散耦合，这样作业就不需要知道谁在产生输入谁在使用输出（见“逻辑与连接的分离”）。
 
 然而许多情况下，你也知道一个作业的输出只是作为另一个作业的输入，而这个作业也是由同一个团队维护的。在这种情况下，分布式文件系统上的文件只是*中间状态*：一种把数据从一个作业传递到下一个作业的方法。在由50或100个MapReduce作业组成的用于构建推荐系统的复杂工作流中，就有许多这样的中间状态。
 
@@ -542,37 +542,37 @@ MapReduce方法更适合于大型任务：处理这么多数据且运行时间�
 
 * 把中间状态存储在分布式文件系统中意味着这些文件被复制到了多个节点上，这对于这些临时数据来说往往是没有必要的。
 
-#### Dataflow engines
+#### 数据流引擎
 
-In order to fix these problems with MapReduce, several new execution engines for distributed batch computations were developed, the most well known of which are Spark [61, 62], Tez [63, 64], and Flink [65, 66]. There are various differences in the way they are designed, but they have one thing in common: they handle an entire workflow as one job, rather than breaking it up into independent subjobs.
+为了用MapReduce解决这些问题，开发了几个用于分布式批量计算的新执行引擎，其中最著名的是Spark、Tez和Flink。它们的设计方式有不同之处，但它们有一个共同点：它们把整个工作流作为一个任务来处理，而不是把它分解为各自独立的子作业。
 
-Since they explicitly model the flow of data through several processing stages, these systems are known as dataflow engines. Like MapReduce, they work by repeatedly calling a user-defined function to process one record at a time on a single thread. They parallelize work by partitioning inputs, and they copy the output of one function over the network to become the input to another function.
+由于它们用好几个处理阶段对数据流进行显式地建模，这些系统被称为*数据流引擎*。与MapReduce类似，它们的工作方式是在单线程上反复调用用户定义的函数每次处理一条记录。通过对输入分区并行化工作，之后通过网络复制一个函数的输出，从而成为另一个函数的输入。
 
-Unlike in MapReduce, these functions need not take the strict roles of alternating map and reduce, but instead can be assembled in more flexible ways. We call these functions operators, and the dataflow engine provides several different options for connecting one operator’s output to another’s input:
+与MapReduce不同的是，这些函数不需要扮演交替映射和归纳的严格角色，而可以以更灵活的方式组织起来。我们把这些函数称为*操作符*，数据流引擎提供了几种不同的选项来把一个操作符的输出连接到另一个操作符的输入：
 
-* One option is to repartition and sort records by key, like in the shuffle stage of MapReduce (see “Distributed execution of MapReduce”). This feature enables sort-merge joins and grouping in the same way as in MapReduce.
+* 一种选择是按照键重新划分、排序记录，就像MapReduce的洗牌阶段（见“MapReduce的分布式执行”一节）。这个功能使得归并连接以及分组的方式与ManReduce的相同。
 
-* Another possibility is to take several inputs and to partition them in the same way, but skip the sorting. This saves effort on partitioned hash joins, where the partitioning of records is important but the order is irrelevant because building the hash table randomizes the order anyway.
+* 另一种可能是接受多个输入并以相同的方式对它们进行分区，但是跳过排序。这样可以节省分区哈希连接的工作，在这里对记录分区很重要但是顺序是无关的，因为无论如何构建哈希表的时候顺序会随机化。
 
-* For broadcast hash joins, the same output from one operator can be sent to all partitions of the join operator.
+* 对于广播哈希连接，可以把来自一个操作符的相同输出发送到联接运算符的所有分区。
 
-This style of processing engine is based on research systems like Dryad [67] and Nephele [68], and it offers several advantages compared to the MapReduce model:
+这种类型的处理引擎基于Dryad和Nephele等研究系统，与MapReduce模型相比，它具有几个优点：
 
-* Expensive work such as sorting need only be performed in places where it is actually required, rather than always happening by default between every map and reduce stage.
+* 诸如排序之类的代价高昂的工作只需要在真正需要的地方执行，而不总是在每个映射和归纳阶段之间默认执行。
 
-* There are no unnecessary map tasks, since the work done by a mapper can often be incorporated into the preceding reduce operator (because a mapper does not change the partitioning of a dataset).
+* 不存在没有必要的映射任务，因为映射函数所做的工作通常可以合并到先前的归纳操作符中（因为映射函数不会更改数据集的分区）。
 
-* Because all joins and data dependencies in a workflow are explicitly declared, the scheduler has an overview of what data is required where, so it can make locality optimizations. For example, it can try to place the task that consumes some data on the same machine as the task that produces it, so that the data can be exchanged through a shared memory buffer rather than having to copy it over the network.
+* 因为工作流中的所有连接和数据依赖都是显式声明的，所以调度程序可以总览在哪里需要使用哪些数据，因此可以进行局部优化。例如，它可以尝试把消费某些数据的任务与生成数据的任务放在同一台设备上，这样就可以通过共享内存缓冲区交换数据，而无需通过网络复制数据。
 
-* It is usually sufficient for intermediate state between operators to be kept in memory or written to local disk, which requires less I/ O than writing it to HDFS (where it must be replicated to several machines and written to disk on each replica). MapReduce already uses this optimization for mapper output, but dataflow engines generalize the idea to all intermediate state.
+* 把操作符之间的中间状态保存在内存中或写入本地磁盘通常就足够了，这比把它们写入HDFS所需的I/O要少（在HDFS中它们就必须被复制到多台设备上，并且写入每个副本上的磁盘中）。MapReduce已经把这种优化用于映射函数的输出，但是数据流引擎将此思想推广到所有中间状态。
 
-* Operators can start executing as soon as their input is ready; there is no need to wait for the entire preceding stage to finish before the next one starts.
+* 操作符可以在输入就绪后立即执行；不需要等待前一阶段完全完成再执行下一个阶段。
 
-* Existing Java Virtual Machine (JVM) processes can be reused to run new operators, reducing startup overheads compared to MapReduce (which launches a new JVM for each task).
+* 现有的Java虚拟机（JVM）进程可以被重用以运行新的操作符，与MapReduce相比减少了启动开销（MapReduce为每个任务启动一个新的JVM）。
 
-You can use dataflow engines to implement the same computations as MapReduce workflows, and they usually execute significantly faster due to the optimizations described here. Since operators are a generalization of map and reduce, the same processing code can run on either execution engine: workflows implemented in Pig, Hive, or Cascading can be switched from MapReduce to Tez or Spark with a simple configuration change, without modifying code [64].
+你可以使用数据流引擎实现与MapReduce工作流相同的计算，而且由于这里描述的优化它们通常执行得更快。因为运算符是映射与归纳的泛化，相同的处理代码可以在任何执行引擎上运行：在Pig、Hive或Cascading中实现的工作流可以通过简单的配置改变从MapReduce切换到Tez或者Spark，而无需修改代码。
 
-Tez is a fairly thin library that relies on the YARN shuffle service for the actual copying of data between nodes [58], whereas Spark and Flink are big frameworks that include their own network communication layer, scheduler, and user-facing APIs. We will discuss those high-level APIs shortly.
+Tez是一个相当轻量的库，它依赖YARN洗牌服务在节点之间实际复制数据，而Spark和Flink是包含着各自网络通信层、调度器和面向用户的API的大型框架。我们稍后会讨论这些高级API。
 
 #### Fault tolerance
 
