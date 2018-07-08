@@ -574,67 +574,67 @@ MapReduce方法更适合于大型任务：处理这么多数据且运行时间�
 
 Tez是一个相当轻量的库，它依赖YARN洗牌服务在节点之间实际复制数据，而Spark和Flink是包含着各自网络通信层、调度器和面向用户的API的大型框架。我们稍后会讨论这些高级API。
 
-#### Fault tolerance
+#### 容错
 
-An advantage of fully materializing intermediate state to a distributed filesystem is that it is durable, which makes fault tolerance fairly easy in MapReduce: if a task fails, it can just be restarted on another machine and read the same input again from the filesystem.
+把中间状态完全物化到分布式文件系统的优点之一是持久性，这使得MapReduce中的容错相当容易：如果任务失败，可以在另一台机器上重新启动它，然后从文件系统再次读取相同的输入。
 
-Spark, Flink, and Tez avoid writing intermediate state to HDFS, so they take a different approach to tolerating faults: if a machine fails and the intermediate state on that machine is lost, it is recomputed from other data that is still available (a prior intermediary stage if possible, or otherwise the original input data, which is normally on HDFS).
+Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的方法来进行容错：如果机器失效而设备上的中间状态丢失，那么从其它仍然可用的数据（如果可以的话是最好是先前的中间阶段，或者通常位于HDFS上的原始输入数据）重新计算。
 
-To enable this recomputation, the framework must keep track of how a given piece of data was computed — which input partitions it used, and which operators were applied to it. Spark uses the resilient distributed dataset (RDD) abstraction for tracking the ancestry of data [61], while Flink checkpoints operator state, allowing it to resume running an operator that ran into a fault during its execution [66].
+要启用这种计算，框架必须跟踪给定的数据块是如何计算的——它使用了哪些输入分区，对这些数据应用了哪些操作符。Spark使用弹性的分布式数据集（RDD）抽象来跟踪数据的祖先，而Flink设置检查点检查操作符状态，允许它继续运行在执行过程中遇到错误的操作符。
 
-When recomputing data, it is important to know whether the computation is deterministic: that is, given the same input data, do the operators always produce the same output? This question matters if some of the lost data has already been sent to downstream operators. If the operator is restarted and the recomputed data is not the same as the original lost data, it becomes very hard for downstream operators to resolve the contradictions between the old and new data. The solution in the case of nondeterministic operators is normally to kill the downstream operators as well, and run them again on the new data.
+在重新计算数据的时侯，知道计算是不是确定性的是很重要的：也就是说，如果给定相同的输入数据，操作符是不是总是产生相同的输出？如果一些丢失了的数据已经被发送到下游操作符，那么这个问题就变得很重要了。如果操作符重新启动但是用于重新计算的数据与原始丢失了的数据不相同，那么下游的操作符很难解决旧数据和新数据之间的矛盾。在非确定性操作符情况的解决方案是通常也杀死下游操作符，并再次在新数据上运行这些操作符。
 
-In order to avoid such cascading faults, it is better to make operators deterministic. Note however that it is easy for nondeterministic behavior to accidentally creep in: for example, many programming languages do not guarantee any particular order when iterating over elements of a hash table, many probabilistic and statistical algorithms explicitly rely on using random numbers, and any use of the system clock or external data sources is nondeterministic. Such causes of nondeterminism need to be removed in order to reliably recover from faults, for example by generating pseudorandom numbers using a fixed seed.
+为了避免这种级联故障，最好是让这些操作符具有确定性。然而请注意，不确定行为很容易意外地蔓延进来：例如，许多编程语言在迭代哈希表元素时不保证任何特定的顺序，许多概率和统计算法显式地依赖使用随机数，而对系统时钟或外部数据源的任何使用都是不确定的。为了可靠地从故障中恢复，需要消除这种不确定性，例如使用固定的种子产生伪随机数。
 
-Recovering from faults by recomputing data is not always the right answer: if the intermediate data is much smaller than the source data, or if the computation is very CPU-intensive, it is probably cheaper to materialize the intermediate data to files than to recompute it.
+通过重新计算数据从故障中恢复并不总是正确的答案：如果中间数据比源数据小得多，或者计算如果非常需要CPU，那么把中间数据物化到文件会比重新计算要便宜。
 
-#### Discussion of materialization
+#### 论物化
 
-Returning to the Unix analogy, we saw that MapReduce is like writing the output of each command to a temporary file, whereas dataflow engines look much more like Unix pipes. Flink especially is built around the idea of pipelined execution: that is, incrementally passing the output of an operator to other operators, and not waiting for the input to be complete before starting to process it.
+回到Unix类比，我们看到MapReduce就像把每个命令的输出写入一个临时文件，而数据流引擎看起来更像Unix管道。尤其是Flink，它是围绕着管道执行的理念构建的：也就是说，把一个操作符的输出逐步传递给其他操作符，而不是等待输入完成之后再开始处理它。
 
-A sorting operation inevitably needs to consume its entire input before it can produce any output, because it’s possible that the very last input record is the one with the lowest key and thus needs to be the very first output record. Any operator that requires sorting will thus need to accumulate state, at least temporarily. But many other parts of a workflow can be executed in a pipelined manner.
+排序操作在产生任何输出之前不可避免地需要消费它的整个输入，因为最后一个输入记录可能会有排序最小的键，因此需要排在输出记录的第一个。因此任何需要排序的操作符都需要累积状态，至少也是暂时的。但是工作流的许多其他部分可以以流水线方式执行。
 
-When the job completes, its output needs to go somewhere durable so that users can find it and use it — most likely, it is written to the distributed filesystem again. Thus, when using a dataflow engine, materialized datasets on HDFS are still usually the inputs and the final outputs of a job. Like with MapReduce, the inputs are immutable and the output is completely replaced. The improvement over MapReduce is that you save yourself writing all the intermediate state to the filesystem as well.
+当作业完成时，它的输出需要变得持久以便用户能够找到并使用它——最可能的情况是它再次被写入分布式文件系统。因此当使用数据流引擎时，在HDFS上的物化数据集通常仍然是作业的输入和最终输出。与MapReduce类似，输入是不可变的，输出被完全替换。与MapReduce相比的改进是，你不需要自己把所有中间状态写入文件系统。
 
-### Graphs and Iterative Processing
+### 图与迭代处理
 
-In “Graph-Like Data Models” we discussed using graphs for modeling data, and using graph query languages to traverse the edges and vertices in a graph. The discussion in Chapter   2 was focused around OLTP-style use: quickly executing queries to find a small number of vertices matching certain criteria.
+在“类图数据模型”一节中，我们讨论了使用图对数据建模，以及使用图形查询语言遍历图中的边和顶点。第二章的讨论集中在OLTP风格的使用上：快速地执行查询以找到少量匹配某些条件的顶点。
 
-It is also interesting to look at graphs in a batch processing context, where the goal is to perform some kind of offline processing or analysis on an entire graph. This need often arises in machine learning applications such as recommendation engines, or in ranking systems. For example, one of the most famous graph analysis algorithms is PageRank [69], which tries to estimate the popularity of a web page based on what other web pages link to it. It is used as part of the formula that determines the order in which web search engines present their results.
+在批处理主题中研究图也是很有趣的，它的目标是在整张图上执行某种离线处理或分析。这种需求通常出现在机器学习类应用中，比如推荐引擎或排名系统中。例如，最著名的图表分析算法之一是PageRank，它试图基于与其链接的其他网页来估计网页的流行度。它用于确定Web搜索引擎呈现结果顺序的公式的一部分。
 
-> **NOTE**
+> **注意**
 >
-> Dataflow engines like Spark, Flink, and Tez (see “Materialization of Intermediate State”) typically arrange the operators in a job as a directed acyclic graph (DAG). This is not the same as graph processing: in dataflow engines, the flow of data from one operator to another is structured as a graph, while the data itself typically consists of relational-style tuples. In graph processing, the data itself has the form of a graph. Another unfortunate naming confusion!
+> 数据流引擎，如Spark，Flink和Tez（见“中间状态的物化”一节）通常把作业中的操作符按有向无圈图（DAG）安排。这与图处理不同：在数据流引擎中，从一个操作符到另一个操作符的数据流被构造为一张图，而数据本身通常由关系风格的元组组成。在图处理中，数据本身具有图的形式。又是一个不幸的命名混乱问题！
 
-Many graph algorithms are expressed by traversing one edge at a time, joining one vertex with an adjacent vertex in order to propagate some information, and repeating until some condition is met — for example, until there are no more edges to follow, or until some metric converges. We saw an example in Figure   2-6, which made a list of all the locations in North America contained in a database by repeatedly following edges indicating which location is within which other location (this kind of algorithm is called a transitive closure).
+许多图算法是通过一次遍历一条边，把一个顶点和一个相邻顶点连接起来以传播某些信息，重复这个过程知道某些条件被满足——例如，直到没有更多的边以遍历，或者直到某些指标收敛。我们在图2-6中看到了一个例子，它通过重复跟踪指示哪个位置在哪个其他位置之中的边（这种算法称为传递闭包），构建出了数据库中北美所有位置的列表。
 
-It is possible to store a graph in a distributed filesystem (in files containing lists of vertices and edges), but this idea of “repeating until done” cannot be expressed in plain MapReduce, since it only performs a single pass over the data. This kind of algorithm is thus often implemented in an iterative style:
+把图存储在分布式文件系统中（在包含顶点和边的列表的文件中）是可能的，但是这种“重复直到完成”的想法无法用普通MapReduce表示，因为它只传递一次数据。因此，这种算法通常以迭代的方式实现：
 
-1. An external scheduler runs a batch process to calculate one step of the algorithm.
+1. 外部调度程序运行批处理来计算算法的一个步骤。
 
-2. When the batch process completes, the scheduler checks whether it has finished (based on the completion condition — e.g., there are no more edges to follow, or the change compared to the last iteration is below some threshold).
+2. 当批处理过程完成时，调度程序将检查它是否已经完成（基于完成条件——例如，没有更多的边可以遍历，或者与上一次迭代相比，变动小于某个阈值）。
 
-3. If it has not yet finished, the scheduler goes back to step 1 and runs another round of the batch process.
+3. 如果尚未完成，调度程序返回到步骤1，并运行另一轮批处理过程。
 
-This approach works, but implementing it with MapReduce is often very inefficient, because MapReduce does not account for the iterative nature of the algorithm: it will always read the entire input dataset and produce a completely new output dataset, even if only a small part of the graph has changed compared to the last iteration.
+这种方法可以工作，但是使用MapReduce实现它通常效率很低，因为MapReduce没有考虑到算法的迭代性质：它总是读取整个输入数据集并生成一个全新的输出数据集，即使是与上一次迭代相比图只有一小部分发生了变化。
 
-#### The Pregel processing model
+#### Pregel处理模型
 
-As an optimization for batch processing graphs, the bulk synchronous parallel (BSP) model of computation [70] has become popular. Among others, it is implemented by Apache Giraph [37], Spark’s GraphX API, and Flink’s Gelly API [71]. It is also known as the Pregel model, as Google’s Pregel paper popularized this approach for processing graphs [72].
+作为批量处理图的优化模型，批量同步并行（BSP）的计算模型开始变得流行。其中，它被Apache Giraph、Spark的GraphX API以及Flink的Gelly API实现。它也被称为Pregel模型，因为谷歌的Pregel论文推广了这种处理图的方法。
 
-Recall that in MapReduce, mappers conceptually “send a message” to a particular call of the reducer because the framework collects together all the mapper outputs with the same key. A similar idea is behind Pregel: one vertex can “send a message” to another vertex, and typically those messages are sent along the edges in a graph.
+回想一下在MapReduce中，映射函数在概念上“发送消息”到对归纳函数的特定调用，因为框架收集了所有有着相同键的映射函数输出。Pregel背后也有类似的理念：一个顶点可以“发送消息”到另一个顶点，通常这些消息是沿着图中的边发送的。
 
-In each iteration, a function is called for each vertex, passing it all the messages that were sent to it — much like a call to the reducer. The difference from MapReduce is that in the Pregel model, a vertex remembers its state in memory from one iteration to the next, so the function only needs to process new incoming messages. If no messages are being sent in some part of the graph, no work needs to be done.
+在每一次迭代中，都会为每个顶点调用一个函数，把所有发送给它的消息传递给它——就像对归纳函数的调用一样。与MapReduce不同的是在Pregel模型中，顶点从一次迭代到下一次迭代的过程中都会在内存中记住自己的状态，因此函数只需要处理新传入的消息。如果在图的某些部分没有发送任何消息，那么就不需要做任何事。
 
-It’s a bit similar to the actor model (see “Distributed actor frameworks”), if you think of each vertex as an actor, except that vertex state and messages between vertices are fault-tolerant and durable, and communication proceeds in fixed rounds: at every iteration, the framework delivers all messages sent in the previous iteration. Actors normally have no such timing guarantee.
+这有点类似于参与者模型（见“分布式参与者框架”），如果您把每个顶点都看作一个参与者，除了顶点状态以及顶点之间的消息是容错的和持久的，并且通信以固定的循环进行：那么在每次迭代时，框架会传递在上一次迭代中发送的所有消息。参与者通常没有这样的时间性保证。
 
-#### Fault tolerance
+#### 容错
 
-The fact that vertices can only communicate by message passing (not by querying each other directly) helps improve the performance of Pregel jobs, since messages can be batched and there is less waiting for communication. The only waiting is between iterations: since the Pregel model guarantees that all messages sent in one iteration are delivered in the next iteration, the prior iteration must completely finish, and all of its messages must be copied over the network, before the next one can start.
+顶点只能通过消息传递通信（而不是直接互相查询）这个事实有助于提高Pregel作业的性能，毕竟消息可以被批处理，而且等待通信的时间更短。唯一的等待发生在迭代之间：因为Pregel模型保证在当次迭代中发送的所有消息都会在下一次迭代中传递，前次迭代必须完成，并且所有的消息必须通过网络复制，然后下一个迭代才能开始。
 
-Even though the underlying network may drop, duplicate, or arbitrarily delay messages (see “Unreliable Networks”), Pregel implementations guarantee that messages are processed exactly once at their destination vertex in the following iteration. Like MapReduce, the framework transparently recovers from faults in order to simplify the programming model for algorithms on top of Pregel.
+尽管底层网络可能丢掉、复制或任意性地延迟消息（见“不可靠的网络”一节），然而Pregel的实现仍然保证消息在下一次迭代的目标顶点上只处理一次。与MapReduce类似，框架自动地从故障中恢复从而简化了Pregel上算法的编程模型。
 
-This fault tolerance is achieved by periodically checkpointing the state of all vertices at the end of an iteration — i.e., writing their full state to durable storage. If a node fails and its in-memory state is lost, the simplest solution is to roll back the entire graph computation to the last checkpoint and restart the computation. If the algorithm is deterministic and messages are logged, it is also possible to selectively recover only the partition that was lost (like we previously discussed for dataflow engines) [72].
+这种容错是通过在迭代结束时定期检查所有顶点的状态来实现的——即把所有的状态都写入持久存储中。如果一个节点失效并且失去了内存中的状态，最简单的解决方案是把整个图的计算回滚到前一个检查点，然后重新启动计算。如果算法是确定性的且记录了所有的消息，那么还可以选择性地只恢复丢失的分区（就像我们之前讨论的数据流引擎一样）。
 
 #### Parallel execution
 
