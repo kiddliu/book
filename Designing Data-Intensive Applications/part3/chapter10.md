@@ -636,51 +636,51 @@ Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的
 
 这种容错是通过在迭代结束时定期检查所有顶点的状态来实现的——即把所有的状态都写入持久存储中。如果一个节点失效并且失去了内存中的状态，最简单的解决方案是把整个图的计算回滚到前一个检查点，然后重新启动计算。如果算法是确定性的且记录了所有的消息，那么还可以选择性地只恢复丢失的分区（就像我们之前讨论的数据流引擎一样）。
 
-#### Parallel execution
+#### 并行执行
 
-A vertex does not need to know on which physical machine it is executing; when it sends messages to other vertices, it simply sends them to a vertex ID. It is up to the framework to partition the graph — i.e., to decide which vertex runs on which machine, and how to route messages over the network so that they end up in the right place.
+顶点不需要知道它正在哪个物理设备上执行；当它向其他顶点发送消息时，它只是把它们发送到一个顶点ID。框架来决定如何分割图——也就是决定哪个顶点在哪个设备上运行，以及如何在网络上路由消息以便它们被发送到了正确的地方。
 
-Because the programming model deals with just one vertex at a time (sometimes called “thinking like a vertex”), the framework may partition the graph in arbitrary ways. Ideally it would be partitioned such that vertices are colocated on the same machine if they need to communicate a lot. However, finding such an optimized partitioning is hard — in practice, the graph is often simply partitioned by an arbitrarily assigned vertex ID, making no attempt to group related vertices together.
+因为编程模型一次只处理一个顶点（有时称为“像顶点一样思考”），所以框架可能以任意方式划分图。理想情况下，如果顶点之间需要大量通信，就可以把它们分配到同一台机器上。然而，要找到这样的优化分区是很难的——在实践中，图通常只是被任意分配的顶点ID分割，而不会尝试把相关的顶点分配在一起。
 
-As a result, graph algorithms often have a lot of cross-machine communication overhead, and the intermediate state (messages sent between nodes) is often bigger than the original graph. The overhead of sending messages over the network can significantly slow down distributed graph algorithms.
+因此，图算法往往存在大量的跨设备通信开销，中间状态（节点之间发送的消息）往往比原始图还要大。通过网络发送消息的开销会显著降低分布式图算法的速度。
 
-For this reason, if your graph can fit in memory on a single computer, it’s quite likely that a single-machine (maybe even single-threaded) algorithm will outperform a distributed batch process [73, 74]. Even if the graph is bigger than memory, it can fit on the disks of a single computer, single-machine processing using a framework such as GraphChi is a viable option [75]. If the graph is too big to fit on a single machine, a distributed approach such as Pregel is unavoidable; efficiently parallelizing graph algorithms is an area of ongoing research [76].
+因此，如果图能够放在单台设备的内存里，那么很可能单机（甚至是单线程）算法的性能将优于分布式批处理过程的性能。即使图太大无法放在内存中，它也可以放在单台设备的磁盘上，使用诸如GraphChi这样的框架进行单设备处理是可行。如果图大到无法适应一台机器，像Pregel这样的分布式方法是免不了的；高效的并行化图算法是一个正在进行的研究领域。
 
-### High-Level APIs and Languages
+### 高级API与语言
 
-Over the years since MapReduce first became popular, the execution engines for distributed batch processing have matured. By now, the infrastructure has become robust enough to store and process many petabytes of data on clusters of over 10,000 machines. As the problem of physically operating batch processes at such scale has been considered more or less solved, attention has turned to other areas: improving the programming model, improving the efficiency of processing, and broadening the set of problems that these technologies can solve.
+自从MapReduce流行这么多年以来，用于分布式批处理的执行引擎变得成熟了。到目前为止，基础设施已经足够强大，可以在10000多台机器集群上存储和处理数以PB字节的数据。随着运营这样规模的批处理问题被或多或少地解决了，人们的注意力转向了其他领域：改进编程模型，提高处理效率，以及扩大这些技术能够解决的问题。
 
-As discussed previously, higher-level languages and APIs such as Hive, Pig, Cascading, and Crunch became popular because programming MapReduce jobs by hand is quite laborious. As Tez emerged, these high-level languages had the additional benefit of being able to move to the new dataflow execution engine without the need to rewrite job code. Spark and Flink also include their own high-level dataflow APIs, often taking inspiration from FlumeJava [34].
+如之前谈到的，例如Hive、Pig、Cascading以及Crunch这样的高级语言和API变得流行起来，是因为手工编写MapReduce作业非常困难。随着Tez的出现，这些高级语言还有了额外的好处，那就是能够迁移到新的数据流执行引擎而无需重写作业代码。Spark和Flink还包括了它们自己的高级数据流API，通常是从FlumeJava[34]中获得灵感。
 
-These dataflow APIs generally use relational-style building blocks to express a computation: joining datasets on the value of some field; grouping tuples by key; filtering by some condition; and aggregating tuples by counting, summing, or other functions. Internally, these operations are implemented using the various join and grouping algorithms that we discussed earlier in this chapter.
+这些数据流API通常使用关系式构建模块来表示计算：把数据集按照某个字段连接起来；按键对元组进行分组；按某种条件进行过滤；通过计数、求和或其他函数聚合元组。在内部，这些操作是使用我们在本章前面讨论过的各种连接和分组算法来实现的。
 
-Besides the obvious advantage of requiring less code, these high-level interfaces also allow interactive use, in which you write analysis code incrementally in a shell and run it frequently to observe what it is doing. This style of development is very helpful when exploring a dataset and experimenting with approaches for processing it. It is also reminiscent of the Unix philosophy, which we discussed in “The Unix Philosophy”.
+除了需要较少代码的这个明显优点外，这些高级接口还允许交互使用，在这种情况下，您可以在命令行中增量地编写分析代码，并经常运行它来观察它正在做什么。这种开发风格在探索数据集以及尝试处理数据集的方法时非常有用。它也让人联想到我们在“Unix哲学”一节中讨论过的Unix哲学。
 
-Moreover, these high-level interfaces not only make the humans using the system more productive, but they also improve the job execution efficiency at a machine level.
+此外，这些高级接口不仅使使用系统的人更加高效，而且在设备级别提高了作业的执行效率。
 
-#### The move toward declarative query languages
+#### 向声明性查询语言的迁移
 
-An advantage of specifying joins as relational operators, compared to spelling out the code that performs the join, is that the framework can analyze the properties of the join inputs and automatically decide which of the aforementioned join algorithms would be most suitable for the task at hand. Hive, Spark, and Flink have cost-based query optimizers that can do this, and even change the order of joins so that the amount of intermediate state is minimized [66, 77, 78, 79].
+与编写代码执行连接相比，把连接指定为关系型运算符的一个优点是，框架可以分析连接输入的属性，然后自动决定上述哪些连接算法最适合手头的任务。Hive、Spark和Flink有基于成本的查询优化器可以做到这一点，甚至可以更改联接的顺序从而最小化中间状态的数量。
 
-The choice of join algorithm can make a big difference to the performance of a batch job, and it is nice not to have to understand and remember all the various join algorithms we discussed in this chapter. This is possible if joins are specified in a declarative way: the application simply states which joins are required, and the query optimizer decides how they can best be executed. We previously came across this idea in “Query Languages for Data”.
+连接算法的选择对批处理作业的性能有很大的影响，而不需要理解和记住本章中所讨论的各种连接算法是很好的。如果连接是以声明式的方式指定的，这就是可能的：应用程序只需声明哪些联接是必需的，而查询优化器将决定如何最好地执行这些连接。我们以前在“查询数据语言”中遇到过这种想法。
 
-However, in other ways, MapReduce and its dataflow successors are very different from the fully declarative query model of SQL. MapReduce was built around the idea of function callbacks: for each record or group of records, a user-defined function (the mapper or reducer) is called, and that function is free to call arbitrary code in order to decide what to output. This approach has the advantage that you can draw upon a large ecosystem of existing libraries to do things like parsing, natural language analysis, image analysis, and running numerical or statistical algorithms.
+但是在其他方面，MapReduce及其数据流继承者与SQL完全声明性的查询模型有很大不同。MapReduce是围绕函数回调的思想构建的：对于每个记录或每组记录，调用一个用户定义的函数（映射函数或还原函数），而这个函数可以自由调用任意代码以决定输出内容。这种方法的优点是，您可以利用现有开发库的大生态系统来进行解析、自然语言分析、图像分析，以及运行数值或统计算法。
 
-The freedom to easily run arbitrary code is what has long distinguished batch processing systems of MapReduce heritage from MPP databases (see “Comparing Hadoop to Distributed Databases”); although databases have facilities for writing user-defined functions, they are often cumbersome to use and not well integrated with the package managers and dependency management systems that are widely used in most programming languages (such as Maven for Java, npm for JavaScript, and Rubygems for Ruby).
+轻松运行任意代码的自由是MapReduce传统批处理系统与MPP数据库的最大区别（见“把Hadoop与分布式数据库进行比较”一节）；虽然数据库有编写用户定义函数的工具，但它们通常使用起来很麻烦，而且与大多数编程语言中广泛使用的包管理器和依赖关系管理系统（比如Java中的Maven、JavaScript中的npm以及Ruby中的Rubygems）集成得并不好。
 
-However, dataflow engines have found that there are also advantages to incorporating more declarative features in areas besides joins. For example, if a callback function contains only a simple filtering condition, or it just selects some fields from a record, then there is significant CPU overhead in calling the function on every record. If such simple filtering and mapping operations are expressed in a declarative way, the query optimizer can take advantage of column-oriented storage layouts (see “Column-Oriented Storage”) and read only the required columns from disk. Hive, Spark DataFrames, and Impala also use vectorized execution (see “Memory bandwidth and vectorized processing”): iterating over data in a tight inner loop that is friendly to CPU caches, and avoiding function calls. Spark generates JVM bytecode [79] and Impala uses LLVM to generate native code for these inner loops [41].
+然而数据流引擎发现，在除了连接之外的领域加入更多声明性特性也是有好处的。例如，如果一个回调函数只包含一个简单的过滤条件，或者它只是从一个记录中选择了一些字段，那么在每个记录上调用该函数都需要大量的CPU开销。如果这种简单的过滤和映射操作是以声明的方式表示的，查询优化器可以利用面向列的存储布局（见“面向列的存储”一节），并且只从磁盘读取所需的列。Hive、Spark DataFrames以及Impala还使用向量化执行（见“内存带宽与向量化处理”一节）：在对CPU缓存友好的内部循环中迭代数据，并避免函数调用。Spark生成JVM字节码，而Impala使用LLVM为这些内部循环生成本地代码。
 
-By incorporating declarative aspects in their high-level APIs, and having query optimizers that can take advantage of them during execution, batch processing frameworks begin to look more like MPP databases (and can achieve comparable performance). At the same time, by having the extensibility of being able to run arbitrary code and read data in arbitrary formats, they retain their flexibility advantage.
+通过在高级API中包含声明性特性，并在执行过程中使用能够利用它们的查询优化器，批处理框架开始看起来更像MPP数据库（并且可以实现类似的性能）。同时，通过具有能够运行任意代码和读取任意格式数据的可扩展性，它们保留了它们的灵活性优势。
 
-#### Specialization for different domains
+#### 不同领域的特化
 
-While the extensibility of being able to run arbitrary code is useful, there are also many common cases where standard processing patterns keep reoccurring, and so it is worth having reusable implementations of the common building blocks. Traditionally, MPP databases have served the needs of business intelligence analysts and business reporting, but that is just one among many domains in which batch processing is used.
+虽然能够运行任意代码的这种可扩展性是有用的，但是也有许多常见的情况中标准处理模式不断重复出现，因此值得拥有常用构建模块的可重用实现。传统上，MPP数据库满足了商业智能分析和业务报告的需要，但这只是应用批处理众多领域中的一个。
 
-Another domain of increasing importance is statistical and numerical algorithms, which are needed for machine learning applications such as classification and recommendation systems. Reusable implementations are emerging: for example, Mahout implements various algorithms for machine learning on top of MapReduce, Spark, and Flink, while MADlib implements similar functionality inside a relational MPP database (Apache HAWQ) [54].
+另一个日益重要的领域是统计和数值算法，这是机器学习应用需要的，比如分类和推荐系统。可重用的实现正在出现：例如，Mahout在MapReduce、Spark和Flink之上实现了各种机器学习算法，而MADlib在关系MPP数据库（Apache HAWQ）中实现了类似的功能。
 
-Also useful are spatial algorithms such as k-nearest neighbors [80], which searches for items that are close to a given item in some multi-dimensional space — a kind of similarity search. Approximate search is also important for genome analysis algorithms, which need to find strings that are similar but not identical [81].
+同样有用的是空间算法，如K-近邻算法，它在多维空间中搜索接近给定项的项——一种相似性搜索。近似搜索对于基因组分析算法也很重要，这些算法需要找到相似但不完全相同的字符串。
 
-Batch processing engines are being used for distributed execution of algorithms from an increasingly wide range of domains. As batch processing systems gain built-in functionality and high-level declarative operators, and as MPP databases become more programmable and flexible, the two are beginning to look more alike: in the end, they are all just systems for storing and processing data.
+批处理引擎正在越来越广泛的领域中用来执行分布式执行算法。随着批处理系统获得内置功能和高级的声明性操作符，并且随着MPP数据库变得更可编程化和灵活，二者开始变得越来越相似：毕竟，它们都只是存储和处理数据的系统。
 
 ## Summary
 
