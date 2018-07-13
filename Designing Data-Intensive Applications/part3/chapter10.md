@@ -626,7 +626,7 @@ Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的
 
 在每一次迭代中，都会为每个顶点调用一个函数，把所有发送给它的消息传递给它——就像对归纳函数的调用一样。与MapReduce不同的是在Pregel模型中，顶点从一次迭代到下一次迭代的过程中都会在内存中记住自己的状态，因此函数只需要处理新传入的消息。如果在图的某些部分没有发送任何消息，那么就不需要做任何事。
 
-这有点类似于参与者模型（见“分布式参与者框架”），如果您把每个顶点都看作一个参与者，除了顶点状态以及顶点之间的消息是容错的和持久的，并且通信以固定的循环进行：那么在每次迭代时，框架会传递在上一次迭代中发送的所有消息。参与者通常没有这样的时间性保证。
+这有点类似于参与者模型（见“分布式参与者框架”），如果你把每个顶点都看作一个参与者，除了顶点状态以及顶点之间的消息是容错的和持久的，并且通信以固定的循环进行：那么在每次迭代时，框架会传递在上一次迭代中发送的所有消息。参与者通常没有这样的时间性保证。
 
 #### 容错
 
@@ -654,7 +654,7 @@ Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的
 
 这些数据流API通常使用关系式构建模块来表示计算：把数据集按照某个字段连接起来；按键对元组进行分组；按某种条件进行过滤；通过计数、求和或其他函数聚合元组。在内部，这些操作是使用我们在本章前面讨论过的各种连接和分组算法来实现的。
 
-除了需要较少代码的这个明显优点外，这些高级接口还允许交互使用，在这种情况下，您可以在命令行中增量地编写分析代码，并经常运行它来观察它正在做什么。这种开发风格在探索数据集以及尝试处理数据集的方法时非常有用。它也让人联想到我们在“Unix哲学”一节中讨论过的Unix哲学。
+除了需要较少代码的这个明显优点外，这些高级接口还允许交互使用，在这种情况下，你可以在命令行中增量地编写分析代码，并经常运行它来观察它正在做什么。这种开发风格在探索数据集以及尝试处理数据集的方法时非常有用。它也让人联想到我们在“Unix哲学”一节中讨论过的Unix哲学。
 
 此外，这些高级接口不仅使使用系统的人更加高效，而且在设备级别提高了作业的执行效率。
 
@@ -664,7 +664,7 @@ Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的
 
 连接算法的选择对批处理作业的性能有很大的影响，而不需要理解和记住本章中所讨论的各种连接算法是很好的。如果连接是以声明式的方式指定的，这就是可能的：应用程序只需声明哪些联接是必需的，而查询优化器将决定如何最好地执行这些连接。我们以前在“查询数据语言”中遇到过这种想法。
 
-但是在其他方面，MapReduce及其数据流继承者与SQL完全声明性的查询模型有很大不同。MapReduce是围绕函数回调的思想构建的：对于每个记录或每组记录，调用一个用户定义的函数（映射函数或还原函数），而这个函数可以自由调用任意代码以决定输出内容。这种方法的优点是，您可以利用现有开发库的大生态系统来进行解析、自然语言分析、图像分析，以及运行数值或统计算法。
+但是在其他方面，MapReduce及其数据流继承者与SQL完全声明性的查询模型有很大不同。MapReduce是围绕函数回调的思想构建的：对于每个记录或每组记录，调用一个用户定义的函数（映射函数或还原函数），而这个函数可以自由调用任意代码以决定输出内容。这种方法的优点是，你可以利用现有开发库的大生态系统来进行解析、自然语言分析、图像分析，以及运行数值或统计算法。
 
 轻松运行任意代码的自由是MapReduce传统批处理系统与MPP数据库的最大区别（见“把Hadoop与分布式数据库进行比较”一节）；虽然数据库有编写用户定义函数的工具，但它们通常使用起来很麻烦，而且与大多数编程语言中广泛使用的包管理器和依赖关系管理系统（比如Java中的Maven、JavaScript中的npm以及Ruby中的Rubygems）集成得并不好。
 
@@ -682,42 +682,42 @@ Spark、Flink和Tez避免把中间状态写入HDFS，因此它们采用不同的
 
 批处理引擎正在越来越广泛的领域中用来执行分布式执行算法。随着批处理系统获得内置功能和高级的声明性操作符，并且随着MPP数据库变得更可编程化和灵活，二者开始变得越来越相似：毕竟，它们都只是存储和处理数据的系统。
 
-## Summary
+## 总结
 
-In this chapter we explored the topic of batch processing. We started by looking at Unix tools such as awk, grep, and sort, and we saw how the design philosophy of those tools is carried forward into MapReduce and more recent dataflow engines. Some of those design principles are that inputs are immutable, outputs are intended to become the input to another (as yet unknown) program, and complex problems are solved by composing small tools that “do one thing well.”
+在这一章里，我们探讨了批处理这个主题。我们首先了解了Unix工具，如`awk`、`grep`和`sort`，我们看到了这些工具的设计理念是如何被移植到MapReduce以及新近的数据流引擎中的。这些设计原则包括输入是不可变的，输出是为了成为另一个（也许未知的）程序的输入，以及复杂的问题是通过组合许多“做好一件事”的小工具来解决的。
 
-In the Unix world, the uniform interface that allows one program to be composed with another is files and pipes; in MapReduce, that interface is a distributed filesystem. We saw that dataflow engines add their own pipe-like data transport mechanisms to avoid materializing intermediate state to the distributed filesystem, but the initial input and final output of a job is still usually HDFS.
+在Unix世界中，允许一个程序与另一个程序结合在一起的统一接口是文件和管道；在MapReduce中，类似的接口是分布式文件系统。我们看到数据流引擎添加了它们自己的类似管道的数据传输机制，从而避免把中间状态物化到分布式文件系统，但是作业的初始输入和最终输出仍然通常是HDFS。
 
-The two main problems that distributed batch processing frameworks need to solve are:
+分布式批处理框架需要解决的两个主要问题是：
 
-*Partitioning*
+*分区*
 
-In MapReduce, mappers are partitioned according to input file blocks. The output of mappers is repartitioned, sorted, and merged into a configurable number of reducer partitions. The purpose of this process is to bring all the related data — e.g., all the records with the same key — together in the same place.
+在MapReduce中，映射函数根据输入文件块进行分区。映射函数的输出被重新划分、排序，并合并到可配置数量的归纳函数分区中。这一过程的目的是把所有相关数据——例如，有着相同键的所有记录——放在同一个地方。
 
-Post-MapReduce dataflow engines try to avoid sorting unless it is required, but they otherwise take a broadly similar approach to partitioning.
+MapReduce之后的数据流引擎试图避免排序，除非它是必需的，否则它们在分区方面采取了大致类似的方法。
 
-*Fault tolerance*
+*容错*
 
-MapReduce frequently writes to disk, which makes it easy to recover from an individual failed task without restarting the entire job but slows down execution in the failure-free case. Dataflow engines perform less materialization of intermediate state and keep more in memory, which means that they need to recompute more data if a node fails. Deterministic operators reduce the amount of data that needs to be recomputed.
+MapReduce经常性地写入磁盘，这使得在不重新启动整个作业的情况下很容易从单个失败的任务中恢复，然而在无故障的情况下则会减慢执行速度。数据流引擎较少执行中间态物化，而是把更多的数据保存在内存中，这意味着如果节点失败，它们需要重新计算更多的数据。确定性操作符减少了需要重新计算的数据量。
 
-We discussed several join algorithms for MapReduce, most of which are also internally used in MPP databases and dataflow engines. They also provide a good illustration of how partitioned algorithms work:
+我们讨论了MapReduce的几种连接算法，其中大多数算法也在MPP数据库和数据流引擎的内部使用。它们也很好地说明了分区算法是如何工作的：
 
-*Sort-merge joins*
+*归并连接*
 
-Each of the inputs being joined goes through a mapper that extracts the join key. By partitioning, sorting, and merging, all the records with the same key end up going to the same call of the reducer. This function can then output the joined records.
+    每个被连接的输入都经过一个映射函数，用于提取连接的键。通过分区、排序与合并，所有具有相同键的记录最终都会去到同一个归纳函数的调用。之后，这个函数就可以输出已连接的记录了。
 
-*Broadcast hash joins*
+*广播哈希连接*
 
-One of the two join inputs is small, so it is not partitioned and it can be entirely loaded into a hash table. Thus, you can start a mapper for each partition of the large join input, load the hash table for the small input into each mapper, and then scan over the large input one record at a time, querying the hash table for each record.
+    两个连接输入中有一个很小，于是可以省去分区步骤而全部加载到哈希表中。因此，你可以为较大的连接输入的每个分区启动一个映射函数，把较小输入的哈希表加载到每个映射函数中，然后每一次扫描较大输入中的一条记录，查询哈希表中的每条记录。
 
-*Partitioned hash joins*
+*分区哈希连接*
 
-If the two join inputs are partitioned in the same way (using the same key, same hash function, and same number of partitions), then the hash table approach can be used independently for each partition.
+    如果以相同的方式（使用相同的键、相同的哈希函数和相同的分区数）对两个连接输入进行分区，那么可以对每个分区独立使用哈希表方法。
 
-Distributed batch processing engines have a deliberately restricted programming model: callback functions (such as mappers and reducers) are assumed to be stateless and to have no externally visible side effects besides their designated output. This restriction allows the framework to hide some of the hard distributed systems problems behind its abstraction: in the face of crashes and network issues, tasks can be retried safely, and the output from any failed tasks is discarded. If several tasks for a partition succeed, only one of them actually makes its output visible.
+分布式批处理引擎的编程模型有刻意的限制：回调函数（例如映射函数和归纳函数）被认为是无状态的，除了它们指定的输出之外，没有任何外部可见的副作用。这种限制允许框架把一些困难的分布式系统问题隐藏在抽象概念之后：在面对崩溃和网络问题的时候，可以安全地重试任务，任何失败任务的输出都被丢弃了。如果一个分区的几个任务成功了，那么只有一个任务的输出是可见的。
 
-Thanks to the framework, your code in a batch processing job does not need to worry about implementing fault-tolerance mechanisms: the framework can guarantee that the final output of a job is the same as if no faults had occurred, even though in reality various tasks perhaps had to be retried. These reliable semantics are much stronger than what you usually have in online services that handle user requests and that write to databases as a side effect of processing a request.
+由于框架的存在，你在批处理作业中的代码不需要实现容错机制：框架保证作业的最终输出与没有发生故障的情况相同，哪怕现实中可能需要重试各种任务。这些可靠的语义要比通常在处理用户请求，以及处理请求过程中需要写入数据库的在线服务所拥有的语义要强得多。
 
-The distinguishing feature of a batch processing job is that it reads some input data and produces some output data, without modifying the input — in other words, the output is derived from the input. Crucially, the input data is bounded: it has a known, fixed size (for example, it consists of a set of log files at some point in time, or a snapshot of a database’s contents). Because it is bounded, a job knows when it has finished reading the entire input, and so a job eventually completes when it is done.
+批处理作业的特点是它读取输入数据、产生输出数据，且不会修改输入——换句话说，输出是从输入衍生出来的。关键的是，输入数据是有界的：它有一个已知且固定的大小（比如，它包含一组在某个时间点的日志文件，或者是数据库内容的快照）。因为它是有界的，所以作业知道它什么时候读取了整个输入，完成的时侯一个作业也最终完成了。
 
-In the next chapter, we will turn to stream processing, in which the input is unbounded — that is, you still have a job, but its inputs are never-ending streams of data. In this case, a job is never complete, because at any time there may still be more work coming in. We shall see that stream and batch processing are similar in some respects, but the assumption of unbounded streams also changes a lot about how we build systems.
+在下一章中，我们将转到流处理，它的输入是没有限制的——也就是说，你还是有一个作业，但是它的输入是永不终止的数据流。在这种情况下，作业永远不会完成，因为在任何时候都可能会出现更多的工作。我们会看到流处理和批处理在某些方面是相似的，但是假设流是无界的也改变了我们构建系统的方式。
