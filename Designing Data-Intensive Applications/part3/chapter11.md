@@ -70,4 +70,82 @@
 
 如果消费者离线，它可能会错过消息无法送达时发出的消息。有些协议允许生产者重发失败的消息，但是如果生产者崩溃，这种方法也就失效了，也失去所有缓冲区内的消息。
 
-If a consumer is offline, it may miss messages that were sent while it is unreachable. Some protocols allow the producer to retry failed message deliveries, but this approach may break down if the producer crashes, losing the buffer of messages that it was supposed to retry.
+#### 消息代理
+
+一种广泛使用的替代方案是通过*消息代理*（也称为消息队列）发送消息，它本质上是一种为处理消息流而优化的数据库。它作为服务器运行，生产者和消费者作为客户端连接到它。生产者将消息写入代理，消费者通过从代理读取消息来接收消息。
+
+通过把数据集中在代理中，这些系统可以更容易地容忍来来去去的客户机（连接、断开和崩溃），而且持久性的问题也被转移到代理上。一些消息代理只把消息保存在内存中，而另一些消息代理（取决于配置）把它们写入磁盘，以便在代理崩溃时不会弄丢它们。面对缓慢的消费者，他们通常允许无限制排队（而不是丢弃消息或是反向压力），尽管这种选择也会取决于配置。
+
+排队的结果也导致消费者通常是*异步的*：当生产者发送消息时，它通常只等待代理确认它已经缓存了消息，而不会等待消息被消费者处理。对消费者的交付将发生在未来的某个时间点——通常在一秒内，但如果存在队列积压，有时会明显更久一些。
+
+#### 消息代理与数据库的比较
+
+一些消息代理甚至可以参与到使用XA或JTA的两阶段提交协议（见“实践中的分布式事务”一节）。这一特性使它们在性质上与数据库非常相似，尽管消息代理和数据库之间仍然存在着重要的实际差异：
+
+* 数据库通常会保存数据，直至它被显式地删除，而大多数消息代理在消息成功传递给消费者后会自动删除它。这样的消息代理不适合长期的数据存储.
+
+* 由于会很快地删除消息，因此大多数消息代理都假定它们的工作集相当小——即队列很短。如果因为消费者速度缓慢（也许是因为内存无法容纳更多地消息，导致消息溢出到磁盘）代理需要缓冲大量消息，那么每个消息需要更长的时间来处理，导致总体吞吐量会下降。
+
+* 数据库通常支持次级索引以及各种数据搜索方式，而消息代理通常支持订阅与某种模式匹配的主题子集的某种方式。这些机制是不同的，但本质上这两种方法都是客户端选择它想知道的数据部分的方法。
+
+* 在查询数据库时，结果通常基于数据某个时间点的快照；如果另一个客户端随后向数据库写入了改变了查询结果的内容，第一个客户端不会发现先前的结果现在已经过时（除非它重复查询，或者轮询变更）。相比之下，消息代理不支持任意查询，但是它们确实在数据更改时通知客户端（即，新消息可用时）。
+
+这是对消息代理的传统视角，它被封装在JMS和AMQP等标准中，并在诸如RabbitMQ、ActiveMQ、HornetQ、Qpid、TIBCO企业消息服务、IBM MQ、Azure服务总线和Google Cloud Pub/Sub等软件中实现。
+
+#### 多个消费者
+
+当多个消费者读取同一主题中的消息时，主要使用两种消息传递模式，如图11-1所示：
+
+*负载均衡*
+
+每条消息都被传递给*一*个消费者，这样消费者就可以在主题中共享处理消息的工作。代理可以把消息指定给任意消费者。当消息处理成本很高时这个模式非常有用，因此你希望能够添加使用者来并行处理。（在AMQP中，你可以通过让多个客户端从同一个队列消费来实现负载平衡，而在JMS中它被称为*共享订阅*。）
+
+*散出*
+
+每条消息都被传递给*所有*的消费者。散出允许多个独立的消费者“收听”到相同的消息广播，而互不影响——这种流相当于有几个不同的批处理作业读取相同的输入文件。（JMS中的主题订阅和AMQP中的交换绑定提供了这个特性。）
+
+Each message is delivered to *all* of the consumers. Fan-out allows several independent consumers to each “tune in” to the same broadcast of messages, without affecting each other — the streaming equivalent of having several different batch jobs that read the same input file. (This feature is provided by topic subscriptions in JMS, and exchange bindings in AMQP.)
+
+*图11-1. (a) 负载平衡: 把消费主题的工作在消费者中共享； (b) 散出: 把每个消息发送给多个消费者。*
+
+这两种模式可以组合在一起：例如，两组不同的使用者可以订阅一个主题，这样每个组可以集体接收所有消息，但是在每个组中只有一个节点接收到每个消息。
+
+#### Acknowledgments and redelivery
+
+消费者可能随时崩溃，因此可能发生这样的情况：代理消息传递给消费者，但消费者没有处理它，或者在崩溃之前只对其进行了部分的处理。为了确保消息不丢失，消息代理使用*应答消息*：客户端在处理消息完成后必须显式地告诉代理，以便代理可以把它从队列中删除。
+
+如果到客户端的连接关闭或超时，而代理没有收到应答，它会假定消息没有被处理，于是它会再次把消息传递给另一个消费者。（请注意，消息实际上*已经*被完全处理但是应答消息在网络中丢失了，这是会发生的。处理这种情况需要原子提交协议，如“实践中的分布式事务”一节中所讨论的那样。）
+
+与负载平衡相结合的时候，这种重发行为对消息排序的影响很有趣。在图11-2中，消费者通常按照生产者发送消息的顺序处理消息。然而，消费者2在处理消息*m3*时崩溃，同时消费者1正在处理消息*m4*。随后把未经确认的消息*m3*重新传递给消费者1，结果消费者1按照*m4*、*m3*、*m5*的顺序处理消息。因此，*m3*和*m4*的交付顺序与生产者1发送的顺序不同。
+
+*图11-2. 消费者2在处理m3的时候崩溃，于是稍后m3被重新发送到消费者1。*
+
+即使消息代理尝试保护消息的顺序（根据JMS和AMQP标准的要求），负载平衡与重发的组合不可避免地导致消息被重新排序。为了避免这个问题，你可以为每个消费者使用独立的队列（即，不使用负载平衡特性）。如果消息完全相互独立，消息重新排序不是问题，但是如果消息之间存在因果依赖关系这就很重要了，这一点我们将在这一章后面看到。
+
+### 分区日志
+
+通过网络发送数据包，或是向网络服务发出请求通常是暂时的操作，不会留下永久的跟踪记录。虽然是可以永久记录它（使用数据包捕获和日志记录），但我们通常不会这样想。即使是那些把消息固化到磁盘的消息代理，在消息传递给消费者之后也会很快再次删除它们，因为这些都是建立在短暂的消息传递思维基础上的。
+
+数据库和文件系统采取相反的方法：写入数据库或文件的所有内容通常都会被永久记录，至少直到有人显式地选择再次删除为止。
+
+这种思维方式的差异对衍生数据的构建方式有很大的影响。正如第10章中所讨论的，批处理过程的一个关键特性是你可以重复运行它们，试验处理步骤，而没有损坏输入的风险（因为输入是只读的）。AMQP/JMS风格的通信不是这样的：如果应答导致消息从代理中删除，那么接收消息就是破坏性的，所以你不能再次运行相同的消费者并期望得到相同的结果。
+
+如果添加新的消费者到消息传递系统，它通常只在注册之后才可以接收消息；任何之前的消息都已经不在了，也无法恢复。与文件和数据库相比，你可以在任何时候添加一个新客户端，并且它可以读取过去任意写入的数据（只要它还没有被应用程序显式覆盖或删除）。
+
+为什么我们不能把数据库的持久存储方法与消息传递的低延迟通知功能结合起来呢？这就是*基于日志的消息代理*背后的理念。
+
+#### 使用日志进行消息存储
+
+日志就是磁盘上只可附加的记录序列。我们先前在第3章中讨论日志结构存储引擎与预写入上下文中的日志和写前日志，在第5章中讨论了复制上下文中的日志。
+
+A log is simply an append-only sequence of records on disk. We previously discussed logs in the context of log-structured storage engines and write-ahead logs in Chapter 3, and in the context of replication in Chapter 5.
+
+The same structure can be used to implement a message broker: a producer sends a message by appending it to the end of the log, and a consumer receives messages by reading the log sequentially. If a consumer reaches the end of the log, it waits for a notification that a new message has been appended. The Unix tool `tail -f`, which watches a file for data being appended, essentially works like this.
+
+In order to scale to higher throughput than a single disk can offer, the log can be *partitioned* (in the sense of Chapter   6). Different partitions can then be hosted on different machines, making each partition a separate log that can be read and written independently from other partitions. A topic can then be defined as a group of partitions that all carry messages of the same type. This approach is illustrated in Figure   11-3.
+
+Within each partition, the broker assigns a monotonically increasing sequence number, or *offset*, to every message (in Figure   11-3, the numbers in boxes are message offsets). Such a sequence number makes sense because a partition is append-only, so the messages within a partition are totally ordered. There is no ordering guarantee across different partitions.
+
+*Figure 11-3. Producers send messages by appending them to a topic-partition file, and consumers read these files sequentially.*
+
+Apache Kafka, Amazon Kinesis Streams, and Twitter’s DistributedLog are log-based message brokers that work like this. Google Cloud Pub/Sub is architecturally similar but exposes a JMS-style API rather than a log abstraction. Even though these message brokers write all messages to disk, they are able to achieve throughput of millions of messages per second by partitioning across multiple machines, and fault tolerance by replicating messages.
