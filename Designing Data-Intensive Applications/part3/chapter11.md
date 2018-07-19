@@ -110,7 +110,7 @@ Each message is delivered to *all* of the consumers. Fan-out allows several inde
 
 这两种模式可以组合在一起：例如，两组不同的使用者可以订阅一个主题，这样每个组可以集体接收所有消息，但是在每个组中只有一个节点接收到每个消息。
 
-#### Acknowledgments and redelivery
+#### 应答与重发
 
 消费者可能随时崩溃，因此可能发生这样的情况：代理消息传递给消费者，但消费者没有处理它，或者在崩溃之前只对其进行了部分的处理。为了确保消息不丢失，消息代理使用*应答消息*：客户端在处理消息完成后必须显式地告诉代理，以便代理可以把它从队列中删除。
 
@@ -136,16 +136,14 @@ Each message is delivered to *all* of the consumers. Fan-out allows several inde
 
 #### 使用日志进行消息存储
 
-日志就是磁盘上只可附加的记录序列。我们先前在第3章中讨论日志结构存储引擎与预写入上下文中的日志和写前日志，在第5章中讨论了复制上下文中的日志。
+日志就是磁盘上只可附加的记录序列。我们先前在第3章中讨论日志结构存储引擎与预写入日志时讨论过日志，在第5章中讨论复制的时候也有涉及。
 
-A log is simply an append-only sequence of records on disk. We previously discussed logs in the context of log-structured storage engines and write-ahead logs in Chapter 3, and in the context of replication in Chapter 5.
+同样的结构也可以用来实现消息代理：生产者通过把消息附加到日志末尾发送消息，而消费者通过顺序读取日志接收消息。如果消费者到达日志的末尾，它会等待新消息被写入的通知。Unix工具`tail-f`本质上说就是这样工作的，它监视被追加的数据的文件。
 
-The same structure can be used to implement a message broker: a producer sends a message by appending it to the end of the log, and a consumer receives messages by reading the log sequentially. If a consumer reaches the end of the log, it waits for a notification that a new message has been appended. The Unix tool `tail -f`, which watches a file for data being appended, essentially works like this.
+为了扩展到一个磁盘所能提供的更高的吞吐量，日志可以被*分区*（在第6章的意义上）。然后，可以把不同的分区托管在不同的设备上，从而使每个分区成为一个独立的、可以互相读写的日志。之后，可以把主题定义为一组分区，这些分区都携带相同类型的消息。这种方法如图11-3所示。
 
-In order to scale to higher throughput than a single disk can offer, the log can be *partitioned* (in the sense of Chapter   6). Different partitions can then be hosted on different machines, making each partition a separate log that can be read and written independently from other partitions. A topic can then be defined as a group of partitions that all carry messages of the same type. This approach is illustrated in Figure   11-3.
+在每个分区中，代理为每个消息分配一个单调递增的序列号，或*偏移量*（在图11-3中，方框中的数字是消息偏移量）。这样的序列号是有意义的，因为分区只能附加，所以分区中的消息是全序的。而在不同的分区之间则没有顺序保证。
 
-Within each partition, the broker assigns a monotonically increasing sequence number, or *offset*, to every message (in Figure   11-3, the numbers in boxes are message offsets). Such a sequence number makes sense because a partition is append-only, so the messages within a partition are totally ordered. There is no ordering guarantee across different partitions.
+*图11-3. 生产者通过把消息添加到主题分区文件来发送消息，而消费者按顺序读取这些文件。*
 
-*Figure 11-3. Producers send messages by appending them to a topic-partition file, and consumers read these files sequentially.*
-
-Apache Kafka, Amazon Kinesis Streams, and Twitter’s DistributedLog are log-based message brokers that work like this. Google Cloud Pub/Sub is architecturally similar but exposes a JMS-style API rather than a log abstraction. Even though these message brokers write all messages to disk, they are able to achieve throughput of millions of messages per second by partitioning across multiple machines, and fault tolerance by replicating messages.
+Apache Kafka、Amazon Kinsis Streams，以及Twitter的DistributedLog都是这样基于日志的消息代理。Google Cloud Pub/Sub在体系结构上是相似的，但公开的是JMS风格的API，而不是抽象日志。即使这些消息代理把所有消息写入磁盘，它们也能够通过跨多台机器进行分区实现每秒数百万条消息的吞吐量，同时通过复制消息实现容错机制。
