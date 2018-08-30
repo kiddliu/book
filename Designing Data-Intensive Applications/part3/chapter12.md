@@ -350,4 +350,80 @@ Unix与关系型数据库处理信息管理问题的哲学非常不同。Unix的
 
 改变写入路径与读取路径上完成的工作实际上是本书开头在“描述符在”一节中推特示例的主题。在这个例子中，我们还看到了对于名人来说，写入路径与读取路径之间的边界可能与普通用户的不同。经过了500页之后，我们已经走了一个完整的循环！
 
-Shifting the boundary between work done on the write path and the read path was in fact the topic of the Twitter example at the beginning of this book, in “Describing Load”. In that example, we also saw how the boundary between write path and read path might be drawn differently for celebrities compared to ordinary users. After 500 pages we have come full circle!
+#### 有状态的，可离线工作的客户端
+
+我发现写读路径之间有边界的想法很有趣，因为我们可以讨论移动这个边界，并从实际的角度探讨这个变化意味着什么。让我们从另外一个的背景来看这个想法。
+
+在过去的二十年里，Web应用的流行使我们对应用程序开发做了一些很容易被认为是理所当然的假设。特别是，客户端/服务器模型——其中客户机基本上是无状态的，服务器对数据有绝对的权限——是如此普遍以至于我们几乎忘记了任何其它模型的存在。然而技术在继续发展，我认为时不时地质疑现状是很重要的。
+
+传统上，Web浏览器一直是无状态客户端，只有在有互联网连接时才能做有用的事情（离线时你唯一能做的就是上下滚动你之前在线时就加载好的页面）。然而，最近的“单页面”JavaScript Web应用有了许多有状态功能，包括客户端的用户界面交互以及在Web浏览器中的持久本地存储。移动应用同样可以在设备上存储大量状态，并且大多数用户交互不需要与服务器交互。
+
+这些还在持续变化的功能让人们对*离线优先*的应用程序重新产生兴趣，它在不需要互联网连接的情况下使用同一设备上的本地数据库可以做尽可能的事情，之后在网络连接可用时再与后台的远程服务器同步。由于移动设备通常有的是缓慢且不可靠的蜂窝互联网连接，如果用户界面不需要等待同步网络请求，而且应用大部分功能可以离线工作（见“有连线操作的客户端”一节），这对用户来说是一个巨大的优势。
+
+当我们不再假设只有与中央数据库通信的无状态客户端，而是转向状态是可以在最终用户的设备上维护的时侯，就打开了一个充满机会的新世界。尤其是，我们可以把设备上的状态视为*服务器上的状态的缓存*。屏幕上显式的是客户端应用模型对象的物化视图；而模型对象是位于远程数据中心里状态的本地副本。
+
+#### 推送状态变更到客户端
+
+在典型的网页中，如果你在Web浏览器中加载页面随后数据在服务器上变了，除非你重新加载页面否则浏览器是不会发现这个变化的。浏览器只会读取某一时间点的数据，假设它是静态的——它不订阅来自服务器的更新。因此，设备上的状态是一个不会更新的陈旧缓存，除非你显式轮询变更。（基于HTTP的摘要订阅协议，比如RSS，实际上只是一种轮询的简单形式。）
+
+最近的协议已经超越了HTTP基本的请求/响应模式：服务器发送的事件（EventSource API）与WebSocket提供了通信通道，通过这些通道Web浏览器可以保持一个打开的TCP连接到服务器，只要连接还在，服务器就可以主动地推送消息到浏览器。这为服务器提供了一个机会，可以主动通知终端用户客户端其本地存储状态发生了变化，从而降低了客户端状态的陈旧程度。
+
+根据我们的写入路径与读取路径模型，主动推送状态更改到客户端设备意味着把写入路径一直延展到了最终用户。当客户端第一次初始化时，它仍然需要使用读取路径来获得它的初始状态，但之后它可以依赖于服务器推送的状态变更流。我们讨论的关于流处理和消息传递的想法并不局限于仅在数据中心中运行：我们可以进一步研究这些想法，并且把它扩展到终端用户设备。
+
+这些设备某些时候会处于脱机状态，在此期间无法从服务器接收任何状态变更的通知。但我们已经解决了这个问题：在“消费者偏移量”一节中，我们讨论了基于日志的消息代理使用者如何在失败或是断开连接后重新连接，并且确保它在断开连接时不会丢失任何到达的消息。同样的技术也适用于单个用户，其中的每个设备都是一个小事件流的订阅者。
+
+#### 端到端的事件流
+
+最近用于开发有状态的客户端与用户界面的工具，比如Elm语言以及Facebook的React\Flux\Redux工具链，都已经通过订阅代表用户输入或服务器响应的事件流来管理内部客户端状态，其结构类似于事件源（见“事件溯源”一节）。
+
+把这个编程模型扩展成允许服务器把状态变更事件推送到客户端的事件管道，是非常自然的。因此，状态变更可以流过端到端的写入路径：从一个触发状态变更设备上的交互，通过事件日志和几个衍生的数据系统和流处理器，一直到另一个设备上观察状态的人的用户界面。这些状态变化能以相当低的延迟传播——比如，端到端一秒以内。
+
+一些应用，比如即时通讯软件与网游，已经有了这样一种（在低延迟的交互意义上，而不是在“响应时间保证”的意义上）“实时”的架构。但是为什么我们不用这种方式构建所有的应用程序呢？
+
+挑战在于，无状态客户端以及请求/响应式交互的假设深深地依赖于我们的数据库、框架和协议。许多数据存储支持一个请求返回一个响应的情况下进行读写操作，但是只有极少数提供订阅变更的能力——也就是，一个请求返回的是随着时间的推移的响应流（见“对变更流的API支持”一节）。
+
+为了把写入路径一路扩展到最终用户，我们需要从根本上重新考虑构建这些系统的方式：远离请求/响应式交互而转向发布/订阅数据流。我认为更具响应性的用户界面与更好的离线支持的优点值得我们为之付出努力。如果你正在设计数据系统，我希望你时刻谨记订阅变化的选择，而不只是查询当前状态。
+
+#### 读也是事件
+
+我们讨论了当流处理器把派生数据写入存储（数据库、缓存或索引），以及用户请求这些存储时，这些存储扮演了写入路径与读取路径之间的边界。存储允许随机查询数据，不然的话就需要扫描整个事件日志。
+
+在许多情况下，数据存储与流传输系统是分开的。但是回想一下，流处理器也需要维护状态来执行聚合以及连接（见“流连接”一节）。这种状态通常隐藏在流处理器内部，但是一些框架也允许它被外部客户端查询，从而把流处理器本身变成一种简单的数据库。
+
+我想让这个想法更进一步。根据截至到目前所讨论到的，对存储的写入请求经过事件日志，而读取请求是直接发送到存储被查询数据节点的短暂网络请求。这是一个合理的设计，但不是唯一的设计。还可以把读取请求表现为事件流，然后既把读取事件也把写入事件发送到流处理起；处理器通过把读取得结果发送到输出流从而响应读事件。
+
+当写入与读取都被表示为事件，并被转发到相同的流操作符进行处理时，我们实际上是在读取查询流与数据库之间执行流-表连接。读取事件需要发送到保有数据的数据库分区（见“请求的转发”一节），就像批处理器与流处理器在连接时需要按相同的键对输入进行分区一样（见“归纳端的连接与分组”一节）。
+
+服务请求与执行连接之间的这种对应关系是很基本的。一次性读取请求只是把请求传递给连接操作符，然后立即忘记它；订阅请求是一个持久连接，连接另一端是过去以及未来的事件。
+
+记录读取事件的日志对于追踪系统中的因果依赖关系和数据来源也是有好处的：它可以让你在用户做出决定之前重新构建他们看到的内容。例如在网上商店中，预测的发货日期以及向客户显示的库存状态很可能会影响他们是否选择购买某一商品。要分析这个连接，您需要记录用户查询的发货以及库存状态的结果。
+
+因此，把读取事件写入持久性存储可以更好地朱总因果关系（见“对事件排序以获取因果关系”一节），但这会导致额外的存储和I/O成本。优化这些系统以减少开销仍然是一个开放性的研究问题[2]。但是如果你已经因为运营的目的记录了读取请求，作为处理请求的副产品，那么把日志改为请求的源并不是什么大改变。
+
+#### 多分区数据的处理
+
+对于只涉及单个分区的查询，通过流发送查询然后收集响应流也许太过了。然而，这种思想为需要组合多个分区数据的复杂查询的分布式执行开启了可能性，同时利用了流处理器提供的消息转发、分区以及连接的架构。
+
+Storm的分布式RPC特性支持这种使用模式（见“消息传递与RPC”一节）。例如，它被用来计算在推特上有多少人看到了一个URL——也就是每个在推特上转发这个URL的人的粉丝集合的联合。因为推特用户的集合是分了区的，那么这个计算需要组合来自多个分区的结果。
+
+这种模式的另一个例子发生在预防欺诈中：为了评估某个购买事件是否具有欺骗性的风险，您可以检查用户IP地址、电子邮件地址、账单地址、发货地址等等的信誉评分。由于每个信誉数据库本身都是分了区的，因此收集特定购买事件的分数需要在不同分区的数据集上进行一系列的连接。
+
+MPP数据库的内部查询执行图具有类似的特性（见“把Hadoop与分布式数据库进行比较”一节）。如果您需要执行这种多分区的连接，那么使用提供这个功能的数据库可能比使用流处理器实现它更简单。然而，将查询看作流提供了一种实现大规模应用程序的选择，这种应用打破了传统现成解决方案的限制。
+
+## 为了正确性
+
+With stateless services that only read data, it is not a big deal if something goes wrong: you can fix the bug and restart the service, and everything returns to normal. Stateful systems such as databases are not so simple: they are designed to remember things forever (more or less), so if something goes wrong, the effects also potentially last forever — which means they require more careful thought [50].
+
+We want to build applications that are reliable and correct (i.e., programs whose semantics are well defined and understood, even in the face of various faults). For approximately four decades, the transaction properties of atomicity, isolation, and durability (Chapter   7) have been the tools of choice for building correct applications. However, those foundations are weaker than they seem: witness for example the confusion of weak isolation levels (see “Weak Isolation Levels”).
+
+In some areas, transactions are being abandoned entirely and replaced with models that offer better performance and scalability, but much messier semantics (see for example “Leaderless Replication”). *Consistency* is often talked about, but poorly defined (see “Consistency” and Chapter   9). Some people assert that we should “embrace weak consistency” for the sake of better availability, while lacking a clear idea of what that actually means in practice.
+
+For a topic that is so important, our understanding and our engineering methods are surprisingly flaky.   For example, it is very difficult to determine whether it is safe to run a particular application at a particular transaction isolation level or replication configuration [51, 52]. Often simple solutions appear to work correctly when concurrency is low and there are no faults, but turn out to have many subtle bugs in more demanding circumstances.
+
+For example, Kyle Kingsbury’s Jepsen experiments [53] have highlighted the stark discrepancies between some products’ claimed safety guarantees and their actual behavior in the presence of network problems and crashes. Even if infrastructure products like databases were free from problems, application code would still need to correctly use the features they provide, which is error-prone if the configuration is hard to understand (which is the case with weak isolation levels, quorum configurations, and so on).
+
+If your application can tolerate occasionally corrupting or losing data in unpredictable ways, life is a lot simpler, and you might be able to get away with simply crossing your fingers and hoping for the best. On the other hand, if you need stronger assurances of correctness, then serializability and atomic commit are established approaches, but they come at a cost: they typically only work in a single datacenter (ruling out geographically distributed architectures), and they limit the scale and fault-tolerance properties you can achieve.
+
+While the traditional transaction approach is not going away, I also believe it is not the last word in making applications correct and resilient to faults. In this section I will suggest some ways of thinking about correctness in the context of dataflow architectures.
+
+Kleppmann, Martin. Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems (Kindle Locations 13756-13784). O'Reilly Media. Kindle Edition. 
