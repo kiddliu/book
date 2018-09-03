@@ -396,7 +396,7 @@ Unix与关系型数据库处理信息管理问题的哲学非常不同。Unix的
 
 服务请求与执行连接之间的这种对应关系是很基本的。一次性读取请求只是把请求传递给连接操作符，然后立即忘记它；订阅请求是一个持久连接，连接另一端是过去以及未来的事件。
 
-记录读取事件的日志对于追踪系统中的因果依赖关系和数据来源也是有好处的：它可以让你在用户做出决定之前重新构建他们看到的内容。例如在网上商店中，预测的发货日期以及向客户显示的库存状态很可能会影响他们是否选择购买某一商品。要分析这个连接，您需要记录用户查询的发货以及库存状态的结果。
+记录读取事件的日志对于追踪系统中的因果依赖关系和数据来源也是有好处的：它可以让你在用户做出决定之前重新构建他们看到的内容。例如在网上商店中，预测的发货日期以及向客户显示的库存状态很可能会影响他们是否选择购买某一商品。要分析这个连接，你需要记录用户查询的发货以及库存状态的结果。
 
 因此，把读取事件写入持久性存储可以更好地朱总因果关系（见“对事件排序以获取因果关系”一节），但这会导致额外的存储和I/O成本。优化这些系统以减少开销仍然是一个开放性的研究问题[2]。但是如果你已经因为运营的目的记录了读取请求，作为处理请求的副产品，那么把日志改为请求的源并不是什么大改变。
 
@@ -406,24 +406,91 @@ Unix与关系型数据库处理信息管理问题的哲学非常不同。Unix的
 
 Storm的分布式RPC特性支持这种使用模式（见“消息传递与RPC”一节）。例如，它被用来计算在推特上有多少人看到了一个URL——也就是每个在推特上转发这个URL的人的粉丝集合的联合。因为推特用户的集合是分了区的，那么这个计算需要组合来自多个分区的结果。
 
-这种模式的另一个例子发生在预防欺诈中：为了评估某个购买事件是否具有欺骗性的风险，您可以检查用户IP地址、电子邮件地址、账单地址、发货地址等等的信誉评分。由于每个信誉数据库本身都是分了区的，因此收集特定购买事件的分数需要在不同分区的数据集上进行一系列的连接。
+这种模式的另一个例子发生在预防欺诈中：为了评估某个购买事件是否具有欺骗性的风险，你可以检查用户IP地址、电子邮件地址、账单地址、发货地址等等的信誉评分。由于每个信誉数据库本身都是分了区的，因此收集特定购买事件的分数需要在不同分区的数据集上进行一系列的连接。
 
-MPP数据库的内部查询执行图具有类似的特性（见“把Hadoop与分布式数据库进行比较”一节）。如果您需要执行这种多分区的连接，那么使用提供这个功能的数据库可能比使用流处理器实现它更简单。然而，将查询看作流提供了一种实现大规模应用程序的选择，这种应用打破了传统现成解决方案的限制。
+MPP数据库的内部查询执行图具有类似的特性（见“把Hadoop与分布式数据库进行比较”一节）。如果你需要执行这种多分区的连接，那么使用提供这个功能的数据库可能比使用流处理器实现它更简单。然而，将查询看作流提供了一种实现大规模应用程序的选择，这种应用打破了传统现成解决方案的限制。
 
 ## 为了正确性
 
-With stateless services that only read data, it is not a big deal if something goes wrong: you can fix the bug and restart the service, and everything returns to normal. Stateful systems such as databases are not so simple: they are designed to remember things forever (more or less), so if something goes wrong, the effects also potentially last forever — which means they require more careful thought [50].
+对于只读取数据的无状态服务，如果出错那没什么大不了的：你可以修复错误然后重新启动服务，之后一切都会恢复正常。数据库等有状态系统就没那么简单了：它的设计目的就是（或多或少的）永远记住事情，因此如果出了问题，这种影响也有可能永远持续下去——这意味着它们需要更仔细的思考。
 
-We want to build applications that are reliable and correct (i.e., programs whose semantics are well defined and understood, even in the face of various faults). For approximately four decades, the transaction properties of atomicity, isolation, and durability (Chapter   7) have been the tools of choice for building correct applications. However, those foundations are weaker than they seem: witness for example the confusion of weak isolation levels (see “Weak Isolation Levels”).
+我们希望构建既可靠又正确的应用（即，即使在遇到各种故障的情况下，它的语义也被很好地定义与理解的程序）。大约四十年来，事物的原子性、隔离性与持久性属性（第7章）一直是构建正确应用的首选工具。然而，这些基础比它们看起来的要弱：比如说弱隔离级别的混乱（见“弱隔离级别”）。
 
-In some areas, transactions are being abandoned entirely and replaced with models that offer better performance and scalability, but much messier semantics (see for example “Leaderless Replication”). *Consistency* is often talked about, but poorly defined (see “Consistency” and Chapter   9). Some people assert that we should “embrace weak consistency” for the sake of better availability, while lacking a clear idea of what that actually means in practice.
+在某些领域，事务被完全抛弃，取而代之的是具有更好性能和扩展性、但语义却要混乱得多的模型（见“无主机复制”）。我们经常提到*一致性*，但是对它的定义却很差（见“一致性”与第9章）。有些人认为为了更好的可用性我们应该“拥抱弱一致性”，然而在实践中这到底意味着什么却没有明确的概念。
 
-For a topic that is so important, our understanding and our engineering methods are surprisingly flaky.   For example, it is very difficult to determine whether it is safe to run a particular application at a particular transaction isolation level or replication configuration [51, 52]. Often simple solutions appear to work correctly when concurrency is low and there are no faults, but turn out to have many subtle bugs in more demanding circumstances.
+对于一个是如此重要的主题，我们的理解与工程方法都令人惊讶地支离破碎。例如，很难确定在特定事务隔离级别或复制配置上运行特定应用是否安全。通常当并发性很低且没有故障时，简单的解决方案看起来是正确的，但在更苛刻的环境中却有许多微妙的bug。
 
-For example, Kyle Kingsbury’s Jepsen experiments [53] have highlighted the stark discrepancies between some products’ claimed safety guarantees and their actual behavior in the presence of network problems and crashes. Even if infrastructure products like databases were free from problems, application code would still need to correctly use the features they provide, which is error-prone if the configuration is hard to understand (which is the case with weak isolation levels, quorum configurations, and so on).
+比如说，凯尔·金斯伯里的Jepsen实验强调了一些产品所声称的安全保证与它们在网络问题和崩溃面前的实际行为之间的明显差异。即使像数据库这样的基础设施产品没有问题，应用程序代码仍然需要正确地使用它们提供的特性，如果配置很难理解的话，这是很容易出错的（比如弱隔离级别与仲裁配置等等）。
 
-If your application can tolerate occasionally corrupting or losing data in unpredictable ways, life is a lot simpler, and you might be able to get away with simply crossing your fingers and hoping for the best. On the other hand, if you need stronger assurances of correctness, then serializability and atomic commit are established approaches, but they come at a cost: they typically only work in a single datacenter (ruling out geographically distributed architectures), and they limit the scale and fault-tolerance properties you can achieve.
+如果你的应用可以容忍偶尔毫无预期的数据损坏或丢失，那么事情就会简单得多，你也许只需要简单地祈祷然后期望最好的结果。另一方面，如果你需要更强的正确性保证，那么可序列化以及原子提交是已经证明了的方法，但是使用它们是要付出代价的：它们通常只能工作在一个数据中心里（因此排除了不同位置的分布式架构），并且限制了你可以实现的规模以及容错属性。
 
-While the traditional transaction approach is not going away, I also believe it is not the last word in making applications correct and resilient to faults. In this section I will suggest some ways of thinking about correctness in the context of dataflow architectures.
+虽然传统的事务处理方法并没有消失，但我也相信，它不是使应用程序正确并适应故障的最终方法。在这一节中，我会在数据流架构下给出一些思考正确性的方法。
 
-Kleppmann, Martin. Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems (Kindle Locations 13756-13784). O'Reilly Media. Kindle Edition. 
+### 端到端的数据库参数
+
+仅仅是因为应用使用的数据系统提供了相对较强的安全属性，比如可序列化的事务，这并不意味着应用可以保证不受数据丢失或损坏的影响。举个例子，如果应用有bug，导致它写入不正确的数据，或是从数据库中删除数据，那么可序列化的事务也无能为力。
+
+这个例子看起来很无聊，但值得认真对待：应用程序会有bug，人们会犯错误。我在“状态、流与不可变性”中用过这个例子，以支持不可变和仅附加的数据，因为一旦移除了破坏好数据的有故障的代码，就很容易从这些错误中恢复。
+
+尽管不变性很有用，但是它本身并不是一种万能药。让我们看一个可能发生数据损坏的更微妙的例子。
+
+Although immutability is useful, it is not a cure-all by itself. Let’s look at a more subtle example of data corruption that can occur.
+
+#### 操作的恰好一次执行
+
+在“容错”一节中，我们遇到了一个名为*恰好一次*（或是*有效一次*）语义的概念。如果在处理消息时出了问题，你要么放弃（丢弃消息——即，导致数据丢失），或者再试一次。如果您再试一次，就有实际上第一次就成功了，只是你没有发现它成功的风险，于是消息最终会被处理两次。
+
+两次处理是数据损坏的一种形式：同一个服务向客户收取两次费用（对他们收费过高）或两次增加计数器（夸大某个指标）都是不可取的。在这种情况下，*恰好一次*意味着使计算的最终效果与没有发生故障是一样的，即使操作实际上因为某个故障而重试过。我们以前讨论了实现这一目标的几种方法。
+
+最有效的方法之一是使操作幂等（见“幂等性”一节），即无论是执行一次还是多次，都确保它具有相同的效果。但是，使天然非幂等的操作成为幂等操作需要耗费一定的精力，并且需要很小心：您可能需要维护一些额外的元数据（比如更新了值的操作ID集合），并确保在从一个节点到另一个节点进行故障迁移时进行隔离（见“主机与锁”一节）。
+
+#### 抑制复制
+
+除了流处理之外，在许多其他地方也存在需要抑制复制的相同模式。比如说，TCP对于数据包使用序列号，从而在接收端将数据以正确顺序排序，并且判断网络上是否丢失或复制了任何数据包。在TCP堆栈将数据提交给应用程序之前，任何丢失的数据包都会被重新传输，任何重复的数据包都会被删除。
+
+但是，这种抑制复制的方式只在单个TCP连接的上下文中起作用。假设TCP连接是客户端到数据库的连接，并且它正在执行示例12-1中的事务。在许多数据库中，事务是绑定到客户端连接的（如果客户端发送了几个查询，因为它们是在同一个TCP连接上发送的，所以数据库知道它们是属于同一个事务）。如果客户端在发送`COMMIT`后获取数据库服务器返回之前遭遇网络闪断，它就不知道事务是否已经提交还是中止了（图8-1）。
+
+*示例12-1. 非幂等性的跨账户转账*
+
+```SQL
+BEGIN TRANSACTION
+UPDATE accounts SET balance = balance + 11.00 WHERE account_id = 1234;
+UPDATE accounts SET balance = balance - 11.00 WHERE account_id = 4321;
+COMMIT;
+```
+
+客户端可以重新连接到数据库然后重试事务，但现在这超出了TCP抑制复制的范围。由于例12-1中的事务不是幂等的，所以可能转账了22美元，而不是期望的11美元。因此，即使示例12-1是事务原子性的标准示例，它实际上是不正确的，而且真实的银行并不是这样工作的。
+
+两阶段提交（见“原子提交与两阶段提交（2PC）”一节）协议打破了TCP连接与事务之间的1对1的映射，因为它们必须允许事务协调程序在网络故障后重新连接到数据库，并告诉它是提交还是中止可疑事务。这是否足以确保事务只执行一次？可惜没有。
+
+即使我们可以抑制数据库的客户端和服务器之间的事务复制，我们还需要担心终端用户设备与应用服务器之间的网络。举个例子，如果用户的客户端是一个Web浏览器，它可能使用HTTP POST请求向服务器提交指令。也许用户正在使用弱蜂窝数据连接，发送`POST`成功后信号变得太弱，无法从服务器接收到响应。
+
+在这种情况下，用户大概会看到一条错误信息，然后他们可能会手动重试。Web浏览器警告说，“您确定要再次提交此表单吗？”——用户回答是，因为他们希望操作发生。(POST/Redirect/GET模式在正常操作中可以避免这个警告，但是如果POST请求超时就没有用了。）从Web服务器的角度来看，重试是一个单独的请求，而从数据库的角度来看，它是一个单独的事务。通常的去重复机制没有用。
+
+#### 操作标识符
+
+为了使操作在经过几次跳跃后保持幂等性，仅仅依靠数据库提供的事务机制是不够的——你需要把端到端请求的流考虑在内。
+
+
+For example, you could generate a unique identifier for an operation (such as a UUID) and include it as a hidden form field in the client application, or calculate a hash of all the relevant form fields to derive the operation ID [3]. If the web browser submits the POST request twice, the two requests will have the same operation ID. You can then pass that operation ID all the way through to the database and check that you only ever execute one operation with a given ID, as shown in Example   12-2.
+
+*Example 12-2. Suppressing duplicate requests using a unique ID*
+
+```SQL
+ALTER TABLE requests ADD UNIQUE (request_id);
+
+BEGIN TRANSACTION;
+
+INSERT INTO
+    requests (request_id, from_account, to_account, amount)
+    VALUES(' 0286FDB8-D7E1-423F-B40B-792B3608036C', 4321, 1234, 11.00);
+
+UPDATE accounts SET balance = balance + 11.00 WHERE account_id = 1234;
+UPDATE accounts SET balance = balance - 11.00 WHERE account_id = 4321;
+
+COMMIT;
+```
+
+Example 12-2 relies on a uniqueness constraint on the `request_id` column. If a transaction attempts to insert an ID that already exists, the `INSERT` fails and the transaction is aborted, preventing it from taking effect twice. Relational databases can generally maintain a uniqueness constraint correctly, even at weak isolation levels (whereas an application-level check-then-insert may fail under nonserializable isolation, as discussed in “Write Skew and Phantoms”).
+
+Besides suppressing duplicate requests, the `requests` table in Example 12-2 acts as a kind of event log, hinting in the direction of event sourcing (see “Event Sourcing”). The updates to the account balances don’t actually have to happen in the same transaction as the insertion of the event, since they are redundant and could be derived from the request event in a downstream consumer — as long as the event is processed exactly once, which can again be enforced using the request ID.
