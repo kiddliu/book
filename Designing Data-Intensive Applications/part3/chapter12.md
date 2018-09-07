@@ -577,3 +577,32 @@ COMMIT;
 
 通过把多分区事务分解为两个不同的分区阶段，并且使用端到端请求ID，我们实现了相同的正确性属性（每个请求恰好应用于付款人与受款人帐户一次），哪怕这是在存在故障的情况下，而且没有使用原子提交协议。使用多个不同分区阶段的想法类似于我们在“多分区数据处理”一节中讨论的内容（也参考“并发控制”一节）。
 
+### 及时性与完整性
+
+事务一个很方便的属性是它们通常是可线性化的（见“可线性化”一节）：也就是说，编写器等待事务提交，然后它的写入对所有读者都是立即可见的。
+
+A convenient property of transactions is that they are typically linearizable (see “Linearizability”): that is, a writer waits until a transaction is committed, and thereafter its writes are immediately visible to all readers.
+
+This is not the case when unbundling an operation across multiple stages of stream processors: consumers of a log are asynchronous by design, so a sender does not wait until its message has been processed by consumers. However, it is possible for a client to wait for a message to appear on an output stream. This is what we did in “Uniqueness in log-based messaging” when checking whether a uniqueness constraint was satisfied.
+
+In this example, the correctness of the uniqueness check does not depend on whether the sender of the message waits for the outcome. The waiting only has the purpose of synchronously informing the sender whether or not the uniqueness check succeeded, but this notification can be decoupled from the effects of processing the message.
+
+More generally, I think the term consistency conflates two different requirements that are worth considering separately:
+
+*Timeliness*
+
+Timeliness means ensuring that users observe the system in an up-to-date state. We saw previously that if a user reads from a stale copy of the data, they may observe it in an inconsistent state (see “Problems with Replication Lag”). However, that inconsistency is temporary, and will eventually be resolved simply by waiting and trying again.
+
+The CAP theorem (see “The Cost of Linearizability”) uses consistency in the sense of linearizability, which is a strong way of achieving timeliness. Weaker timeliness properties like read-after-write consistency (see “Reading Your Own Writes”) can also be useful.
+
+Integrity
+
+Integrity means absence of corruption; i.e., no data loss, and no contradictory or false data. In particular, if some derived dataset is maintained as a view onto some underlying data (see “Deriving current state from the event log”), the derivation must be correct. For example, a database index must correctly reflect the contents of the database — an index in which some records are missing is not very useful.
+
+If integrity is violated, the inconsistency is permanent: waiting and trying again is not going to fix database corruption in most cases. Instead, explicit checking and repair is needed. In the context of ACID transactions (see “The Meaning of ACID”), consistency is usually understood as some kind of application-specific notion of integrity. Atomicity and durability are important tools for preserving integrity.
+
+In slogan form: violations of timeliness are “eventual consistency,” whereas violations of integrity are “perpetual inconsistency.”
+
+I am going to assert that in most applications, integrity is much more important than timeliness. Violations of timeliness can be annoying and confusing, but violations of integrity can be catastrophic.
+
+For example, on your credit card statement, it is not surprising if a transaction that you made within the last 24 hours does not yet appear — it is normal that these systems have a certain lag. We know that banks reconcile and settle transactions asynchronously, and timeliness is not very important here [3]. However, it would be very bad if the statement balance was not equal to the sum of the transactions plus the previous statement balance (an error in the sums), or if a transaction was charged to you but not paid to the merchant (disappearing money). Such problems would be violations of the integrity of the system.
