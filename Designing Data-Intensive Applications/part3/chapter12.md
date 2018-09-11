@@ -579,30 +579,68 @@ COMMIT;
 
 ### 及时性与完整性
 
-事务一个很方便的属性是它们通常是可线性化的（见“可线性化”一节）：也就是说，编写器等待事务提交，然后它的写入对所有读者都是立即可见的。
+事务一个很方便的属性是它们通常是可线性化的（见“可线性化”一节）：也就是说，写者等待事务提交，之后它的写入对所有读者都是立即可见的。
 
-A convenient property of transactions is that they are typically linearizable (see “Linearizability”): that is, a writer waits until a transaction is committed, and thereafter its writes are immediately visible to all readers.
+在拆解横跨多个阶段流处理器的操作时，情况就不是这样的了：日志的消费者在设计上就是异步的，所以发送方不会等待消费者对消息的处理。然而客户端可以等待消息出现在输出流上。这就是我们在“基于日志的消息系统中的唯一性”一节中检查唯一性约束是否满足时的做法。
 
-This is not the case when unbundling an operation across multiple stages of stream processors: consumers of a log are asynchronous by design, so a sender does not wait until its message has been processed by consumers. However, it is possible for a client to wait for a message to appear on an output stream. This is what we did in “Uniqueness in log-based messaging” when checking whether a uniqueness constraint was satisfied.
+在这个例子里，唯一性检查的正确性不取决于消息的发送方是否等待结果。等待的目的只是可以同步通知发送方唯一性检查是否成功，但这个通知可以与消息的处理产生的效果解耦。
 
-In this example, the correctness of the uniqueness check does not depend on whether the sender of the message waits for the outcome. The waiting only has the purpose of synchronously informing the sender whether or not the uniqueness check succeeded, but this notification can be decoupled from the effects of processing the message.
+更广泛地说，我认为一致性一词把两个不同的需求混为一谈，值得分开考虑：
 
-More generally, I think the term consistency conflates two different requirements that are worth considering separately:
+*及时性*
 
-*Timeliness*
+及时性意味着确保用户看到系统处于最新的状态。我们之前看到，如果用户从陈旧的数据副本中读取数据，他们可能会看到数据处于不一致的状态（见“复制滞后的问题”一节）。然而这种不一致是暂时的，最终只要等待然后再次尝试就可以解决。
 
-Timeliness means ensuring that users observe the system in an up-to-date state. We saw previously that if a user reads from a stale copy of the data, they may observe it in an inconsistent state (see “Problems with Replication Lag”). However, that inconsistency is temporary, and will eventually be resolved simply by waiting and trying again.
+CAP定理（见“可线性化的成本”一节）使用了可线性化意义上的一致性，这是实现及时性的有力途径。稍弱的及时性，比如写入后读取一致性（见“读取你自己的写入”一节）也是有用的。
 
-The CAP theorem (see “The Cost of Linearizability”) uses consistency in the sense of linearizability, which is a strong way of achieving timeliness. Weaker timeliness properties like read-after-write consistency (see “Reading Your Own Writes”) can also be useful.
+*完整性*
 
-Integrity
+完整性意味着没有损坏；即，没有数据丢失，也没有矛盾或是错误的数据。特别是，如果某些衍生数据集是某些底层数据的视图（见“从事件日志衍生当前状态”一节），那么衍生必须是正确的。举个例子，数据库索引必须正确地反映数据库的内容——缺少一些记录的索引是没有什么用的。
 
-Integrity means absence of corruption; i.e., no data loss, and no contradictory or false data. In particular, if some derived dataset is maintained as a view onto some underlying data (see “Deriving current state from the event log”), the derivation must be correct. For example, a database index must correctly reflect the contents of the database — an index in which some records are missing is not very useful.
+如果违反了完整性，那么这种不一致性就是永久的了：在大多数情况下，等待之后再次尝试不会修复数据库损坏。相反地，我们需要显式检查与修复。在ACID事务的情景下（见“ACID的含义”一节），一致性通常被理解为某种应用特定的完整性概念。原子性以及持久性是保持完整性的重要工具。
 
-If integrity is violated, the inconsistency is permanent: waiting and trying again is not going to fix database corruption in most cases. Instead, explicit checking and repair is needed. In the context of ACID transactions (see “The Meaning of ACID”), consistency is usually understood as some kind of application-specific notion of integrity. Atomicity and durability are important tools for preserving integrity.
+用短语的形式说：违反及时性的行为是“最终一致的”，而违反完整性的行为则是“永久不一致”。
 
-In slogan form: violations of timeliness are “eventual consistency,” whereas violations of integrity are “perpetual inconsistency.”
+我判断在大多数应用程序中，完整性比及时性更重要。违反及时性可能会很烦人，令人困惑，但违反了完整性会是灾难性的。
 
-I am going to assert that in most applications, integrity is much more important than timeliness. Violations of timeliness can be annoying and confusing, but violations of integrity can be catastrophic.
+例如，在你的信用卡账单中，如果没有出现在过去24小时内发生的事务，这并不奇怪——这些系统有一定的滞后是正常的。我们知道银行以异步方式调节和结算交易，而及时性在这里并不是很重要。但是，如果账户余额不等于交易的总和加上先前的账户余额（总金额有错误），或者交易向你收取了费用但没有支付给商家（钱消失了），那将是非常糟糕的。这些问题都违反了系统的完整性。
 
-For example, on your credit card statement, it is not surprising if a transaction that you made within the last 24 hours does not yet appear — it is normal that these systems have a certain lag. We know that banks reconcile and settle transactions asynchronously, and timeliness is not very important here [3]. However, it would be very bad if the statement balance was not equal to the sum of the transactions plus the previous statement balance (an error in the sums), or if a transaction was charged to you but not paid to the merchant (disappearing money). Such problems would be violations of the integrity of the system.
+#### 数据流系统的正确性
+
+ACID事务通常同时提供及时性（比如，可线性化）与完整性（比如，原子提交）保证。因此，如果你从ACID事务的角度来处理应用程序的正确性，那么及时性和完整性之间的区别是相当无关紧要的。
+
+另一方面，我们在本章中讨论到的基于事件的数据流系统的一个有趣的特性是，它们把时效性和完整性解耦。异步处理事件流时，及时性是无法保证的，除非你显式地构建那种在返回之前等待消息到达的消费者。但是完整性实际上是流系统的核心。
+
+*恰好一次*或是*有效一次*语义（见“容错”一节）是一种维护完整性的机制。如果丢失了一个事件，或者一个事件生效了两次，数据系统的完整性就会被破坏。因此，可容错的消息传递与抑制重复（比如，幂等操作）对于在遇到故障时保持数据系统的完整性非常重要。
+
+正如我们在上一节中所看到的，可靠的流处理系统可以在不需要分布式事务和原子提交协议的情况下保持完整性，这意味着它们可以以更好的性能与操作健壮性实现类似的正确性。实现这种完整性是通过多种机制的组合完成的：
+
+* 把写操作的内容表示为单个消息，这可以很容易做原子地写入——一种非常适合事件溯源的方法（见“事件溯源”一节）
+
+* 使用确定性衍生函数从单个消息衍生出其余所有的状态更新，类似于存储过程（见“实际串行执行”与“应用程序代码作为衍生函数”一节）
+
+* 通过在所有的处理级别之间传递客户端生成的请求ID，从而启用端到端的抑制重复与幂等性操作
+
+* 使消息变得不可变，并且允许时不时地重新处理衍生数据，使得从bug中恢复变得更容易（见“不可变事件的优点”一节）
+
+在我看来，这种组合机制对于未来构建可容错的应用程序来说是一个非常有希望的方向。
+
+#### 松散解读的约束条件
+
+正如前面所讨论的，强制执行唯一性约束需要协商一致，通常是通过把特定分区中的所有事件发送到单个节点实现的。如果我们想要传统形式的唯一性约束，这种限制无法避免，流处理也无法避免。
+
+然而，另一件需要认识到的事情是，许多真实世界里的应用程序实际上可以用很弱的唯一性概念来解决：
+
+* 如果两个人同时注册了相同的用户名，或是预订了相同的座位，你可以向其中一人发送一条消息表示歉意，然后要求他们选择不同的位置。这种纠正错误的变更称为补偿事务。
+
+* 如果顾客订购的物品数量比你仓库里的还要多，你可以订购更多的库存，为延误向顾客道歉，并给他们打折。这实际上与叉车在仓库里撞翻了一些物品，从而使你的库存比想象的要少之后你必须做的是一样的。因此无论如何，道歉工作流程都必须成为业务流程的一部分，因此可能不需要对库存中的项目数量有可线性化的约束。
+
+* 同样，许多航空公司超售机票，期望一些乘客会错过他们的航班，还有许多酒店会超售房间，预计一些客人会取消预订。在这些情况下，由于商业原因故意违反了“每个座位一人”的限制，因此补偿流程（退款、升仓、在邻近酒店提供免费房间）就是用来处理供不应求的情况的。即使没有超售，也需要道歉和赔偿流程来处理因恶劣天气或是员工罢工而被取消的航班——从这些问题中恢复只是正常业务的一部分。
+
+* 如果有人取出了比他的帐户余额更多的钱，银行可以向他们收取透支费，并要求他们偿还他们所欠的钱。通过限制每天的提款总额，银行的风险是有限的。
+
+在许多业务环境中，暂时地违反约束条件，稍后再通过道歉来修复实际上是可以接受的。道歉的成本（在金钱或名誉方面）各不相同，但通常都很低：你不能撤销一封电子邮件，但你可以通过发送一封后续更正的邮件。如果你不小心向信用卡收取了两次费用，你可以退还其中一笔费用，而对你来说，费用只是手续费外加可能的客户投诉。一旦自动取款机中支付了钱，你无法直接取回，哪怕原则上如果账户透支而客户不偿还，你可以派收债人来收回这笔钱。
+
+道歉的代价是否可以承受是一个商业上的决定。如果可以，那么在写入数据之前传统的检查所有约束的模型就是没有必要的限制，并且也不需要一个可线性化的约束。先乐观地进行一次写入然后再检查约束，也可以是一个合理的选择。你仍然可以保证验证发生在需要花费很大代价恢复的事情之前，但这并不意味着你必须在写入数据之前进行验证。
+
+这些应用*确实*需要完整性：你不会想失去预订，或是因为不匹配的贷方和借方而让钱消失。但是它们在强制约束时*不*要求及时性：如果你卖出的物品比仓库里有的还多，你可以先道歉，事后再修复这个问题。这样做与我们在“处理写入冲突”一节中讨论的冲突解决方法类似。
